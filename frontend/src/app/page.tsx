@@ -6,9 +6,9 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { Bot, User, Send, Loader2, Plus, Menu, X, Book } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
 import ReactMarkdown from 'react-markdown'
+import { cn } from "@/libs"
 
 type Message = {
   id: string
