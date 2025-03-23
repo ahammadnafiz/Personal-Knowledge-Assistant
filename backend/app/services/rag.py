@@ -25,7 +25,6 @@ class RAGService:
             model_name=settings.EMBEDDING_MODEL,
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True},
-            # huggingface_token=settings.HF_TOKEN
         )
     
     def _initialize_or_load_vector_store(self):

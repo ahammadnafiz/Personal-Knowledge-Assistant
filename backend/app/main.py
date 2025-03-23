@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.api.routes.chat import router as chat_router
 from app.core.config import settings
 
-app = FastAPI(title="Book Knowledge Assistant")
+app = FastAPI(title="Personal Knowledge Assistant")
 
 # Configure CORS
 app.add_middleware(
