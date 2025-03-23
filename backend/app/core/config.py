@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
     
     # LLM settings
-    LLM_MODEL: str = "llama3-70b-8192"
+    LLM_MODEL: str = "qwen-2.5-32b"
     
     # RAG settings
     CHUNK_SIZE: int = 1000

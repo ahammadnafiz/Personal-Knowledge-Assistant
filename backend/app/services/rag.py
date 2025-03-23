@@ -1,4 +1,4 @@
-# app/services/rag.py
+# app/services/rag.py updates
 import os
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_community.vectorstores import FAISS
@@ -54,28 +54,57 @@ class RAGService:
             output_key="answer"
         )
     
-    def ingest_documents(self, directory_path: str):
-        """Process all PDF documents in the specified directory and add them to the vector store."""
-        # Load documents
-        loader = DirectoryLoader(
-            directory_path, 
-            glob="**/*.pdf", 
-            loader_cls=PyPDFLoader,
-            show_progress=True
-        )
-        documents = loader.load()
+    def ingest_documents(self, directory_path: str, specific_files: Optional[List[str]] = None):
+        """
+        Process PDF documents in the specified directory and add them to the vector store.
         
-        # Split documents into chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.CHUNK_SIZE,
-            chunk_overlap=settings.CHUNK_OVERLAP
-        )
-        chunks = text_splitter.split_documents(documents)
+        Args:
+            directory_path: Path to the directory containing PDF documents
+            specific_files: If provided, only process these specific files
+        
+        Returns:
+            Number of chunks added to the vector store
+        """
+        if specific_files:
+            # Load specific files
+            chunks = []
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=settings.CHUNK_SIZE,
+                chunk_overlap=settings.CHUNK_OVERLAP
+            )
+            
+            for filename in specific_files:
+                file_path = os.path.join(directory_path, filename)
+                if os.path.exists(file_path) and filename.lower().endswith('.pdf'):
+                    loader = PyPDFLoader(file_path)
+                    documents = loader.load()
+                    file_chunks = text_splitter.split_documents(documents)
+                    chunks.extend(file_chunks)
+        else:
+            # Load all documents in the directory
+            loader = DirectoryLoader(
+                directory_path, 
+                glob="**/*.pdf", 
+                loader_cls=PyPDFLoader,
+                show_progress=True
+            )
+            documents = loader.load()
+            
+            # Split documents into chunks
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=settings.CHUNK_SIZE,
+                chunk_overlap=settings.CHUNK_OVERLAP
+            )
+            chunks = text_splitter.split_documents(documents)
+        
+        # No documents found
+        if not chunks:
+            return 0
         
         # Create or update the vector store
         if os.path.exists(settings.VECTOR_STORE_PATH):
             # If it exists, add documents to it
-            vector_store = FAISS.load_local(settings.VECTOR_STORE_PATH, self.embeddings)
+            vector_store = FAISS.load_local(settings.VECTOR_STORE_PATH, self.embeddings, allow_dangerous_deserialization = True)
             vector_store.add_documents(chunks)
             vector_store.save_local(settings.VECTOR_STORE_PATH)
             self.vector_store = vector_store
