@@ -4,53 +4,84 @@
 
 @layer base {
   :root {
+    /* ChatGPT-inspired light theme with blue accent */
     --background: 0 0% 100%;
-    --foreground: 0 0% 0%;
+    --foreground: 220 10% 23%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 0%;
+    --card-foreground: 220 10% 23%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
-    --primary: 0 0% 0%;
+    --popover-foreground: 220 10% 23%;
+    --primary: 210 100% 50%; /* Blue accent color */
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 0%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 0 0% 96%;
-    --accent-foreground: 0 0% 0%;
+    --secondary: 210 20% 98%;
+    --secondary-foreground: 220 10% 23%;
+    --muted: 210 20% 98%;
+    --muted-foreground: 220 5% 40%;
+    --accent: 210 100% 97%; /* Light blue accent */
+    --accent-foreground: 210 100% 50%; /* Blue accent for text */
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 0 0% 0%;
-    --radius: 0.75rem;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 210 100% 50%; /* Blue ring */
+    --radius: 0.5rem;
   }
 
   .dark {
-    --background: 0 0% 0%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 0%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 0%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 0 0% 100%;
-    --primary-foreground: 0 0% 0%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 65%;
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 100%;
+    /* ChatGPT-inspired dark theme with blue accent */
+    --background: 220 10% 10%;
+    --foreground: 210 20% 98%;
+    --card: 220 10% 13%;
+    --card-foreground: 210 20% 98%;
+    --popover: 220 10% 13%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 210 100% 50%; /* Blue accent color */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 10% 16%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 220 10% 16%;
+    --muted-foreground: 220 10% 70%;
+    --accent: 210 50% 16%; /* Dark blue accent */
+    --accent-foreground: 210 100% 70%; /* Light blue accent for text */
     --destructive: 0 62% 30%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 20%;
-    --input: 0 0% 20%;
-    --ring: 0 0% 100%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 220, 10%, 20%;
+    --input: 220 10% 20%;
+    --ring: 210 100% 50%; /* Blue ring */
   }
 }
 
 @layer base {
   body {
-    @apply bg-background text-foreground dark:bg-background dark:text-foreground;
+    @apply bg-background text-foreground;
   }
+}
+
+/* Custom scrollbar for a more modern look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Message animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message-animate-in {
+  animation: fadeIn 0.3s ease forwards;
 }
