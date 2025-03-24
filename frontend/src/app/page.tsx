@@ -103,14 +103,53 @@ export default function ModernChatInterface() {
         padding: 0 !important;
       }
       
+      /* Enhanced KaTeX styling */
+      .katex-display {
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0.5rem 0;
+        margin: 0 !important;
+      }
+  
+      .katex {
+        font-size: 1.1em;
+        text-rendering: auto;
+      }
+  
+      /* Math display container */
+      .math-display {
+        width: 100%;
+        overflow-x: auto;
+        margin: 1rem 0;
+        padding: 0.5rem 0;
+        background-color: rgba(0, 0, 0, 0.02);
+        border-radius: 0.5rem;
+      }
+  
+      .dark .math-display {
+        background-color: rgba(255, 255, 255, 0.02);
+      }
+  
+      /* Inline math styling */
+      .math-inline .katex {
+        font-size: 1.05em;
+        display: inline-block;
+      }
+  
+      .math-inline {
+        background-color: rgba(0, 0, 0, 0.02);
+        border-radius: 0.25rem;
+        padding: 0 0.25rem;
+      }
+  
+      .dark .math-inline {
+        background-color: rgba(255, 255, 255, 0.02);
+      }
+  
+      /* Code highlighting */
       pre code.hljs {
         padding: 1rem !important;
         border-radius: 0.5rem;
-      }
-      
-      .math-display {
-        overflow-x: auto;
-        padding: 1rem 0;
       }
     `
     document.head.appendChild(style)
@@ -339,23 +378,81 @@ export default function ModernChatInterface() {
     }).format(date)
   }
 
-  const renderTypingAnimation = (content: string) => {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-        className="prose prose-sm dark:prose-invert max-w-none"
+// Updated renderTypingAnimation function with proper type checking
+const renderTypingAnimation = (content: string) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="prose prose-sm dark:prose-invert max-w-none"
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkMath]}
+        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+        components={{
+          code({ node, inline, className, children, ...props }: any) {
+            const match = /language-(\w+)/.exec(className || '')
+            return !inline && match ? (
+              <div className="relative my-4">
+                <div className="absolute right-2 top-2 text-xs text-muted-foreground">
+                  {match[1]}
+                </div>
+                <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto">
+                  <code className={`language-${match[1]}`} {...props}>
+                    {children}
+                  </code>
+                </pre>
+              </div>
+            ) : (
+              <code className="bg-muted px-1.5 py-0.5 rounded text-sm" {...props}>
+                {children}
+              </code>
+            )
+          },
+          // Fix for math display
+          'div': ({ node, className, children, ...props }: any) => {
+            // Check if this is a math display node
+            const isMathDisplay = node?.properties?.className ? 
+              (Array.isArray(node.properties.className) 
+                ? node.properties.className.includes('math-display')
+                : node.properties.className.includes('math-display')) 
+              : false;
+              
+            if (isMathDisplay) {
+              return (
+                <div className="math-display overflow-x-auto py-2 my-4">
+                  {children}
+                </div>
+              )
+            }
+            return <div className={className} {...props}>{children}</div>
+          },
+          // Fix for inline math
+          'span': ({ node, className, children, ...props }: any) => {
+            // Check if this is a math inline node
+            const isMathInline = node?.properties?.className ? 
+              (Array.isArray(node.properties.className) 
+                ? node.properties.className.includes('math-inline')
+                : node.properties.className.includes('math-inline')) 
+              : false;
+              
+            if (isMathInline) {
+              return (
+                <span className="math-inline mx-1 inline-block">
+                  {children}
+                </span>
+              )
+            }
+            return <span className={className} {...props}>{children}</span>
+          }
+        }}
       >
-        <ReactMarkdown
-          remarkPlugins={[remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-        >
-          {content}
-        </ReactMarkdown>
-      </motion.div>
-    )
-  }
+        {content}
+      </ReactMarkdown>
+    </motion.div>
+  )
+}
 
   const isDesktop = isBrowser ? window.innerWidth >= 768 : false
 
@@ -660,9 +757,8 @@ export default function ModernChatInterface() {
                           remarkPlugins={[remarkMath]}
                           rehypePlugins={[rehypeKatex, rehypeHighlight]}
                           components={{
-                            code({ className, children, ...props }: any) {
+                            code({ node, inline, className, children, ...props }: any) {
                               const match = /language-(\w+)/.exec(className || '')
-                              const inline = !props.node?.tagName || props.node?.tagName === 'code'
                               return !inline && match ? (
                                 <div className="relative my-4">
                                   <div className="absolute right-2 top-2 text-xs text-muted-foreground">
@@ -680,21 +776,36 @@ export default function ModernChatInterface() {
                                 </code>
                               )
                             },
-                            // Custom components for math elements
+                            // Fix for math display
                             'div': ({ node, className, children, ...props }: any) => {
-                              if (node?.properties?.className?.includes('math-display')) {
+                              // Check if this is a math display node
+                              const isMathDisplay = node?.properties?.className ? 
+                                (Array.isArray(node.properties.className) 
+                                  ? node.properties.className.includes('math-display')
+                                  : node.properties.className.includes('math-display')) 
+                                : false;
+                                
+                              if (isMathDisplay) {
                                 return (
-                                  <div className="math-display">
+                                  <div className="math-display overflow-x-auto py-2 my-4">
                                     {children}
                                   </div>
                                 )
                               }
                               return <div className={className} {...props}>{children}</div>
                             },
+                            // Fix for inline math
                             'span': ({ node, className, children, ...props }: any) => {
-                              if (node?.properties?.className?.includes('math-inline')) {
+                              // Check if this is a math inline node
+                              const isMathInline = node?.properties?.className ? 
+                                (Array.isArray(node.properties.className) 
+                                  ? node.properties.className.includes('math-inline')
+                                  : node.properties.className.includes('math-inline')) 
+                                : false;
+                                
+                              if (isMathInline) {
                                 return (
-                                  <span className="mx-1">
+                                  <span className="math-inline mx-1 inline-block">
                                     {children}
                                   </span>
                                 )
