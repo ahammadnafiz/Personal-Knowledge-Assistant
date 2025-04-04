@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen-2.5-32b"
     
     # RAG settings
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 200
+    CHUNK_SIZE: int = 512
+    CHUNK_OVERLAP: int = 128
     TOP_K_RESULTS: int = 5
 
 settings = Settings()

@@ -5,7 +5,7 @@ from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.memory import ConversationBufferMemory
@@ -147,24 +147,27 @@ class RAGService:
             search_kwargs={"k": settings.TOP_K_RESULTS}
         )
         
-        # Create the prompt template with chat history context
-        prompt = ChatPromptTemplate.from_template("""
-        You are a knowledgeable assistant that helps users find information from books.
-        
-        Previous conversation:
-        {chat_history}
-        
-        Answer the following question based on the provided context. If the answer is not in the context, 
-        say "I don't have enough information to answer this question" and don't try to make up an answer.
-        
-        Context:
-        {context}
-        
-        Question:
-        {input}
-        
-        Answer:
-        """)
+        # Create the prompt template with improved instructions
+        prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are a knowledgeable assistant that helps users find information from technical documents and research papers.
+                Your goal is to provide accurate, detailed answers based solely on the provided context.
+                
+                You must:
+                1. Only use information from the provided context.
+                2. Be comprehensive and detailed in your explanations.
+                3. If asked about code or algorithms, explain the implementation details if they appear in the context.
+                4. Cite specific sections or papers when relevant.
+                5. Acknowledge when information might be incomplete.
+                6. If asked for code and the context contains code or detailed algorithm descriptions, provide it in a structured format.
+                7. If the answer is not in the context, say "I don't have enough information in the knowledge base to answer this question completely" and provide what you do know from the context.
+                
+                Do NOT make up or hallucinate information not present in the context."""),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{input}"),
+                ("system", """Base your answer exclusively on the following context:
+                
+                {context}"""),
+            ])
         
         # Create the document chain
         document_chain = create_stuff_documents_chain(self.llm, prompt)
