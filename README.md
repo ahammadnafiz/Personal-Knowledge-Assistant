@@ -1,6 +1,4 @@
-
 <h1 align="center">Personal Knowledge Assistant</h1>
-
 
 Welcome to the **Personal Knowledge Assistant** project! This guide will walk you through setting up both the frontend and backend components of the system, a RAG-based platform for querying books and personal knowledge.
 
