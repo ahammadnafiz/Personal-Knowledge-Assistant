@@ -14,7 +14,7 @@ async def chat(request: ChatRequest):
     """
     try:
         rag_service = RAGService()
-        response, sources = rag_service.process_query(
+        response, sources, debug_info = rag_service.process_query(
             query=request.query,
             chat_history=request.chat_history
         )
