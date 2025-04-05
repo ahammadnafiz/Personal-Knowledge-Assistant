@@ -11,7 +11,7 @@ from app.core.config import settings
 router = APIRouter()
 
 # Ensure the upload directory exists
-UPLOAD_DIR = "books"
+UPLOAD_DIR = "knowledge_base"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/upload")

@@ -3,6 +3,93 @@
 Welcome to the **Personal Knowledge Assistant** project! This guide will walk you through setting up both the frontend and backend components of the system, a RAG-based platform for querying books and personal knowledge.
 
 ---
+## Architecture
+
+The system follows a RAG (Retrieval-Augmented Generation) architecture:
+
+![Architecture Diagram](assets/image.png)
+
+
+## **System Architecture Overview**
+
+The system is composed of six primary modules, each responsible for a specific phase in the document-based question answering pipeline:
+
+---
+
+### **1. Document Ingestion & Storage**
+
+- **PDF Parsing**: Input documents are parsed using `PyPDFLoader` to extract raw text.
+- **Text Chunking**: Content is segmented into overlapping chunks using `RecursiveCharacterTextSplitter` to preserve context across boundaries.
+- **Embedding Generation**: Each chunk is embedded via `HuggingFaceEmbeddings`, enabling semantic similarity computations.
+- **Vector Store Indexing**: Embeddings are indexed using `FAISS` for fast approximate nearest neighbor (ANN) retrieval.
+
+---
+
+### **2. Query Processing**
+
+- **Query Rewriting**: The user's input query is reformulated to enhance clarity and relevance using a query rewriting module. This step improves downstream retrieval performance by aligning queries with document semantics.
+
+---
+
+### **3. Contextual Document Retrieval**
+
+- **Two-Stage Compression Pipeline**:
+  - **Stage 1 – Embedding Filter**: Non-relevant chunks are filtered using vector similarity.
+  - **Stage 2 – LLM Extractor**: A lightweight LLM identifies and extracts only the most pertinent content within retained chunks.
+- This dual-filter mechanism ensures both precision and computational efficiency.
+
+---
+
+### **4. Confidence-Based Adaptive Processing (CRAG Framework)**
+
+- Each retrieved chunk is assigned a **relevance confidence score** (range: 0–1).
+- The system dynamically adapts its reasoning strategy:
+  - **High Confidence (>0.7)**: Use only the top-ranked chunk.
+  - **Medium Confidence (0.3–0.7)**: Use top-*k* chunks selectively.
+  - **Low Confidence (<0.3)**: Use a wider range of documents to maximize recall.
+
+---
+
+### **5. Knowledge Refinement**
+
+- Extracted segments are converted into **structured bullet points** or **summarized knowledge units**.
+- This format facilitates interpretability and supports response conditioning.
+
+---
+
+### **6. Response Generation**
+
+- A structured prompt is constructed, incorporating:
+  - Refined knowledge base
+  - Confidence metadata
+  - Conversation history (for multi-turn coherence)
+- A language model generates the final response, which is appended to memory for future interactions.
+
+---
+
+### **Summary Flow (Optional Diagram Legend for Visual Architecture)**
+
+```
+[PDF Documents]
+     ↓
+[Document Ingestion Module]
+     ↓
+[Text Chunking → Embedding → FAISS Index]
+     ↓
+[Query Rewriting]
+     ↓
+[Retriever w/ Compression Pipeline]
+     ↓
+[Confidence Scoring (CRAG)]
+     ↓
+[Key Point Extraction]
+     ↓
+[Prompt Construction + Chat History]
+     ↓
+[LLM Response Generation]
+     ↓
+[Memory Update]
+```
 
 ## Prerequisites
 
