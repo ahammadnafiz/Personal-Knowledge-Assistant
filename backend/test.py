@@ -1,18 +1,48 @@
+# app/services/rag.py
 import os
-import numpy as np
+import re
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.chains import create_retrieval_chain
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.memory import ConversationBufferMemory
-from langchain.schema import SystemMessage, HumanMessage, AIMessage, Document
-from langchain.retrievers.document_compressors import EmbeddingsFilter
+from langchain.schema import SystemMessage, HumanMessage, AIMessage
+from langchain.prompts import PromptTemplate
+from langchain.schema.document import Document
+from langchain.retrievers.document_compressors import EmbeddingsFilter, LLMChainExtractor
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import DocumentCompressorPipeline
+from pydantic import BaseModel, Field
 from app.core.config import settings
 from typing import List, Tuple, Dict, Any, Optional
+
+class RetrievalEvaluatorInput(BaseModel):
+    """
+    Model for capturing the relevance score of a document to a query.
+    """
+    relevance_score: float = Field(..., description="Relevance score between 0 and 1, "
+                                                   "indicating the document's relevance to the query.")
+
+class QueryRewriterInput(BaseModel):
+    """
+    Model for capturing a rewritten query suitable for web search.
+    """
+    query: str = Field(..., description="The query rewritten for better search results.")
+
+class KnowledgeRefinementInput(BaseModel):
+    """
+    Model for extracting key points from a document.
+    """
+    key_points: str = Field(..., description="Key information extracted from the document in bullet-point form.")
+
+class TranslationInput(BaseModel):
+    """
+    Model for capturing translated text.
+    """
+    translated_text: str = Field(..., description="The translated text.")
 
 class RAGService:
     def __init__(self):
@@ -20,10 +50,18 @@ class RAGService:
         self.vector_store = self._initialize_or_load_vector_store()
         self.llm = self._initialize_llm()
         self.memory = self._initialize_memory()
+        
+        # Thresholds for CRAG implementation
+        self.lower_threshold = 0.3
+        self.upper_threshold = 0.7
+        
+        # Language settings
+        self.default_output_language = "bengali"
     
     def _initialize_embeddings(self):
+        """Initialize multilingual embeddings model that supports Bengali"""
         return HuggingFaceEmbeddings(
-            model_name=settings.EMBEDDING_MODEL,
+            model_name=settings.EMBEDDING_MODEL,  # Should be multilingual model
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True},
         )
@@ -67,269 +105,91 @@ class RAGService:
             output_key="answer"
         )
     
-    def _create_document_evaluator(self):
+    def detect_language(self, text):
         """
-        Create a document evaluator to assess document quality.
-        Part of the CRAG implementation for quality assessment.
+        Detect if text is Bengali or English based on character ranges.
+        Returns 'bengali' if Bengali characters are detected, 'english' otherwise.
         """
-        evaluator_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a document relevance evaluator. Your job is to determine how relevant 
-            the retrieved document is to the user's query. Score the document from 0-10, where:
-            - 0-3: Irrelevant or barely related
-            - 4-6: Somewhat relevant but missing key information
-            - 7-10: Highly relevant and contains needed information
+        # Bengali Unicode range: \u0980-\u09FF
+        bengali_pattern = re.compile(r'[\u0980-\u09FF]')
+        if bengali_pattern.search(text):
+            return 'bengali'
+        return 'english'
+    
+    def translate_to_bengali(self, text):
+        """Translate English text to Bengali using the LLM"""
+        if not text or self.detect_language(text) == 'bengali':
+            return text  # No need to translate if already Bengali or empty
             
-            ONLY return a numerical score and nothing else."""),
-            ("human", "Query: {query}\n\nDocument: {document_content}\n\nRelevance score (0-10):"),
-        ])
-        
-        # Create an evaluator chain
-        return create_stuff_documents_chain(self.llm, evaluator_prompt)
-    
-    def _evaluate_documents(self, documents, query):
-        """
-        Evaluate each document's relevance to the query.
-        Returns documents with scores added to metadata.
-        """
-        scored_documents = []
-        
-        for doc in documents:
-            try:
-                # Use a simpler approach with direct LLM call
-                prompt = f"""Query: {query}
-
-                        Document: {doc.page_content}
-
-                        On a scale of 0-10, how relevant is this document to the query? 
-                        0-3: Irrelevant or barely related
-                        4-6: Somewhat relevant but missing key information
-                        7-10: Highly relevant and contains needed information
-
-                        Relevance score (0-10):"""
-                
-                # Call LLM directly
-                score_response = self.llm.invoke(prompt)
-                
-                # Extract the numerical score
-                try:
-                    score = float(score_response.content.strip())
-                except ValueError:
-                    # If we can't parse the response as a float, default to a middle score
-                    score = 5.0
-                
-                # Create a new document with the score in metadata
-                metadata = dict(doc.metadata)
-                metadata["relevance_score"] = score
-                
-                new_doc = Document(
-                    page_content=doc.page_content,
-                    metadata=metadata
-                )
-                scored_documents.append(new_doc)
-                
-            except Exception as e:
-                print(f"Error evaluating document: {e}")
-                # Keep the document but with a neutral score
-                metadata = dict(doc.metadata)
-                metadata["relevance_score"] = 5.0
-                
-                new_doc = Document(
-                    page_content=doc.page_content,
-                    metadata=metadata
-                )
-                scored_documents.append(new_doc)
-        
-        return scored_documents
-    
-    def _hypothetical_answer_generation(self, query):
-        """
-        Generate a hypothetical answer to guide better retrieval.
-        This is part of the CRAG implementation (Query Transformation).
-        """
-        # Use a direct prompt to avoid dictionary input errors
-        prompt = f"""You are an expert research assistant. Given a user's question, 
-        generate what you think would be a comprehensive and accurate answer based on your knowledge.
-        This hypothetical answer will be used to guide document retrieval.
-        Keep your answer concise but informative, focusing on key points that should be covered.
-
-        User question: {query}
-
-        Your hypothetical answer:"""
-        
-        try:
-            response = self.llm.invoke(prompt)
-            return response.content
-        except Exception as e:
-            print(f"Error generating hypothetical answer: {e}")
-            return query  # Fallback to original query
-    
-    def _query_transformation(self, query, chat_history=None):
-        """
-        Transform the query using chat history and hypothetical answers.
-        This is part of the CRAG implementation.
-        """
-        # Extract previous interactions if available
-        recent_history = []
-        if chat_history:
-            # Get the last 3 exchanges (max)
-            for i in range(min(6, len(chat_history))):
-                message = chat_history[-(i+1)]
-                if i < 6:  # Limit to 3 exchanges (6 messages)
-                    recent_history.insert(0, f"{message['role']}: {message['content']}")
-        
-        history_text = "\n".join(recent_history) if recent_history else "No previous conversation."
-        
-        # Generate a hypothetical answer to guide retrieval
-        hypothetical_answer = self._hypothetical_answer_generation(query)
-        
-        # Direct approach to avoid dictionary input errors
-        prompt = f"""You are an expert at reformulating search queries to improve document retrieval.
-        Your task is to enhance the original query by:
-        1. Incorporating relevant context from the conversation history
-        2. Adding key terms from the hypothetical answer
-        3. Expanding abbreviations and technical terms
-        4. Using synonyms for important concepts
-        5. Breaking complex questions into key retrieval components
-        
-        Return ONLY the enhanced query text without explanation.
-
-        Original query: {query}
-        
-        Recent conversation history:
-        {history_text}
-        
-        Hypothetical answer points:
-        {hypothetical_answer}
-        
-        Enhanced query:"""
-        
-        try:
-            response = self.llm.invoke(prompt)
-            enhanced_query = response.content.strip()
-            return enhanced_query
-        except Exception as e:
-            print(f"Error transforming query: {e}")
-            return query  # Fallback to original query
-    
-    def _knowledge_stripping(self, documents, query):
-        """
-        Break documents into smaller segments and evaluate their relevance.
-        This is part of the CRAG implementation.
-        """
-        if not documents:
-            return []
+        prompt = PromptTemplate(
+            input_variables=["text"],
+            template="""Translate the following text to Bengali. Maintain all technical terms and their 
+            meaning accurately. If there are domain-specific technical terms that don't have direct 
+            Bengali equivalents, provide the original term followed by a Bengali explanation in parentheses.
             
-        # First break into smaller segments
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300,  # Smaller chunks for more granular relevance assessment
-            chunk_overlap=50
+            Text to translate: {text}
+            
+            Bengali translation:"""
         )
-        
-        # Create smaller segments from the retrieved documents
-        small_chunks = []
-        
-        for doc in documents:
-            # Split the text
-            splits = text_splitter.split_text(doc.page_content)
-            
-            # Create new document objects for each chunk
-            for i, chunk in enumerate(splits):
-                metadata = dict(doc.metadata)
-                metadata["chunk_index"] = i
-                metadata["original_doc_id"] = id(doc)
-                
-                chunk_doc = Document(
-                    page_content=chunk,
-                    metadata=metadata
-                )
-                small_chunks.append(chunk_doc)
-        
-        # Get embeddings for query and chunks
-        query_embedding = self.embeddings.embed_query(query)
-        
-        # Calculate similarity and rank chunks
-        ranked_chunks = []
-        for chunk in small_chunks:
-            chunk_embedding = self.embeddings.embed_query(chunk.page_content)
-            similarity = self._calculate_similarity(query_embedding, chunk_embedding)
-            
-            # Add similarity score to metadata
-            metadata = dict(chunk.metadata)
-            metadata["similarity_score"] = similarity
-            
-            new_chunk = Document(
-                page_content=chunk.page_content,
-                metadata=metadata
-            )
-            ranked_chunks.append(new_chunk)
-        
-        # Sort by similarity score
-        ranked_chunks.sort(key=lambda x: x.metadata["similarity_score"], reverse=True)
-        
-        # Get top chunks
-        top_chunks = ranked_chunks[:min(len(ranked_chunks), settings.TOP_K_RESULTS * 2)]
-        
-        # Final step: Evaluate each top chunk with the LLM
-        evaluated_chunks = self._evaluate_documents(top_chunks, query)
-        
-        # Sort by relevance score
-        evaluated_chunks.sort(key=lambda x: x.metadata["relevance_score"], reverse=True)
-        
-        # Return top chunks by relevance score
-        final_chunks = evaluated_chunks[:min(len(evaluated_chunks), settings.TOP_K_RESULTS)]
-        
-        return final_chunks
+        chain = prompt | self.llm.with_structured_output(TranslationInput)
+        input_variables = {"text": text}
+        return chain.invoke(input_variables).translated_text
     
-    def _calculate_similarity(self, vec1, vec2):
-        """Calculate cosine similarity between two vectors"""
-        dot_product = np.dot(vec1, vec2)
-        norm1 = np.linalg.norm(vec1)
-        norm2 = np.linalg.norm(vec2)
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0
-        return dot_product / (norm1 * norm2)
+    def translate_query_to_english(self, query):
+        """Translate Bengali query to English for better retrieval"""
+        if self.detect_language(query) == 'english':
+            return query  # No need to translate if already English
+            
+        prompt = PromptTemplate(
+            input_variables=["text"],
+            template="""Translate the following Bengali text to English accurately. Maintain the original 
+            meaning and any technical terminology.
+            
+            Bengali text: {text}
+            
+            English translation:"""
+        )
+        chain = prompt | self.llm.with_structured_output(TranslationInput)
+        input_variables = {"text": query}
+        return chain.invoke(input_variables).translated_text
     
-    def _answer_refinement(self, initial_answer, query, documents):
+    def retrieval_evaluator(self, query, document):
         """
-        Refine the initial answer for accuracy and completeness.
-        This is part of the CRAG implementation (post-generation verification).
+        Evaluate the relevance of a document to a query.
+        Returns a relevance score between 0 and 1.
         """
-        # Extract the most relevant excerpts from documents
-        evidence = []
-        for doc in documents:
-            # Add source information if available
-            source_info = f" (Source: {doc.metadata.get('source', 'Unknown')})"
-            evidence.append(f"{doc.page_content}{source_info}")
-        
-        evidence_text = "\n\n".join(evidence)
-        
-        # Direct approach to avoid dictionary input errors
-        prompt = f"""You are a fact-checking assistant that ensures answers are accurate and supported by evidence.
-        Your task is to analyze an initial answer against the provided evidence and:
-        1. Verify that all claims in the answer are supported by the evidence
-        2. Remove or correct any unsupported claims
-        3. Add any important information from the evidence that was missed
-        4. Ensure proper attribution to sources
-        5. Maintain a helpful, informative tone
-        
-        Produce a refined answer that is maximally accurate and helpful based on ONLY the provided evidence.
-
-        User query: {query}
-        
-        Initial answer: {initial_answer}
-        
-        Evidence from documents:
-        {evidence_text}
-        
-        Refined answer:"""
-        
-        try:
-            response = self.llm.invoke(prompt)
-            return response.content
-        except Exception as e:
-            print(f"Error refining answer: {e}")
-            return initial_answer  # Fallback to initial answer
+        prompt = PromptTemplate(
+            input_variables=["query", "document"],
+            template="On a scale from 0 to 1, how relevant is the following document to the query? "
+                     "Query: {query}\nDocument: {document}\nRelevance score:"
+        )
+        chain = prompt | self.llm.with_structured_output(RetrievalEvaluatorInput)
+        input_variables = {"query": query, "document": document}
+        result = chain.invoke(input_variables).relevance_score
+        return result
+    
+    def knowledge_refinement(self, document):
+        """Extract key points from a document in bullet-point form."""
+        prompt = PromptTemplate(
+            input_variables=["document"],
+            template="Extract the key information from the following document in bullet points:"
+                     "\n{document}\nKey points:"
+        )
+        chain = prompt | self.llm.with_structured_output(KnowledgeRefinementInput)
+        input_variables = {"document": document}
+        result = chain.invoke(input_variables).key_points
+        return [point.strip() for point in result.split('\n') if point.strip()]
+    
+    def rewrite_query(self, query):
+        """Rewrite a query to make it more suitable for retrieval."""
+        prompt = PromptTemplate(
+            input_variables=["query"],
+            template="Rewrite the following query to make it more suitable for document retrieval:"
+                     "\n{query}\nRewritten query:"
+        )
+        chain = prompt | self.llm.with_structured_output(QueryRewriterInput)
+        input_variables = {"query": query}
+        return chain.invoke(input_variables).query.strip()
     
     def ingest_documents(self, directory_path: str, specific_files: Optional[List[str]] = None):
         """
@@ -420,58 +280,170 @@ class RAGService:
             elif message.get("role") == "system":
                 self.memory.chat_memory.add_message(SystemMessage(content=message.get("content", "")))
     
+    def create_contextually_compressed_retriever(self, query):
+        """
+        Create a contextually compressed retriever that combines CRAG evaluation
+        with contextual compression techniques.
+        """
+        # First, create base retriever
+        base_retriever = self.vector_store.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": settings.TOP_K_RESULTS}
+        )
+        
+        # Create document compressors
+        
+        # 1. Embeddings filter to remove irrelevant portions
+        embeddings_filter = EmbeddingsFilter(
+            embeddings=self.embeddings,
+            similarity_threshold=0.75  # Adjust threshold as needed
+        )
+        
+        # 2. LLM extractor to pull out only the most relevant information
+        
+        # Modified to accept 'question' and 'context' instead of 'query' and 'document'
+        extractor_prompt = PromptTemplate(
+            input_variables=["question", "context"],
+            template="""Given the following question and context, extract only the parts of the context 
+            that are directly relevant to answering the question. Focus on maintaining key information while removing 
+            irrelevant content.
+            
+            Question: {question}
+            Context: {context}
+            
+            Relevant content:"""
+        )
+        
+        llm_extractor = LLMChainExtractor.from_llm(
+            self.llm,
+            prompt=extractor_prompt
+        )
+        
+        # Chain the compressors
+        compression_pipeline = DocumentCompressorPipeline(
+            transformers=[embeddings_filter, llm_extractor]
+        )
+        
+        # Create contextual compression retriever
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compression_pipeline,
+            base_retriever=base_retriever
+        )
+        
+        return compression_retriever
+    
     def process_query(self, query: str, chat_history: Optional[List[Dict[str, Any]]] = None) -> Tuple[str, List[str]]:
-        """Process a query using full Corrective RAG (CRAG) implementation."""
+        """Process a query using Combined CRAG and Contextual Compression RAG with Bengali support."""
         # Load chat history into memory if provided
         self.load_chat_history(chat_history)
         
-        # CRAG Step 1: Query Transformation
-        enhanced_query = self._query_transformation(query, chat_history)
-        print(f"Enhanced query: {enhanced_query}")
+        # Detect query language and translate to English if needed for better retrieval
+        query_language = self.detect_language(query)
+        english_query = query if query_language == 'english' else self.translate_query_to_english(query)
         
-        # Make sure the vector store is initialized
-        if self.vector_store is None:
-            return "I don't have any documents in my knowledge base yet. Please add some documents first.", []
+        # Step 1: Query rewriting (from CRAG) to improve retrieval
+        rewritten_query = self.rewrite_query(english_query)
+        print(f"Original query: {query}")
+        print(f"Processed query for retrieval: {rewritten_query}")
         
-        # Create a basic retriever
-        base_retriever = self.vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": settings.TOP_K_RESULTS * 2}  # Get more documents initially
-        )
+        # Step 2: Retrieve documents using contextual compression
+        compression_retriever = self.create_contextually_compressed_retriever(rewritten_query)
+        retrieved_docs = compression_retriever.invoke(rewritten_query)
         
-        # CRAG Step 2: Initial Retrieval with enhanced query
-        try:
-            # Use invoke instead of get_relevant_documents
-            retrieval_result = base_retriever.invoke(enhanced_query)
-            initial_docs = retrieval_result if isinstance(retrieval_result, list) else [retrieval_result]
-        except Exception as e:
-            print(f"Error during retrieval: {e}")
-            # Fall back to regular retrieval
-            initial_docs = base_retriever.get_relevant_documents(enhanced_query)
+        # Step 3: Evaluate document relevance (from CRAG)
+        eval_scores = [self.retrieval_evaluator(english_query, doc.page_content) for doc in retrieved_docs]
+        print(f"Evaluation scores: {eval_scores}")
         
-        # CRAG Step 3: Document Quality Assessment
-        if not initial_docs:
-            return "No relevant documents found in the knowledge base for your query.", []
+        # Step 4: Implement CRAG's adaptive retrieval strategy based on confidence
+        max_score = max(eval_scores) if eval_scores else 0
+        sources = []
+        final_knowledge_text = ""
+        
+        if max_score > self.upper_threshold:
+            # High confidence - use best document directly
+            print("Action: High Confidence - Using top retrieved document")
+            best_doc_index = eval_scores.index(max_score)
+            best_doc = retrieved_docs[best_doc_index]
             
-        scored_docs = self._evaluate_documents(initial_docs, enhanced_query)
+            # Extract key knowledge using knowledge refinement
+            key_points = self.knowledge_refinement(best_doc.page_content)
+            final_knowledge_text = "\n".join([f"- {point}" for point in key_points])
+            
+            # Track source
+            if hasattr(best_doc, "metadata") and "source" in best_doc.metadata:
+                sources.append(best_doc.metadata["source"])
         
-        # Sort by relevance score and keep top K
-        scored_docs.sort(key=lambda x: x.metadata.get("relevance_score", 0), reverse=True)
-        filtered_docs = scored_docs[:settings.TOP_K_RESULTS]
+        elif max_score < self.lower_threshold:
+            # Low confidence - reformulate approach
+            print("Action: Low Confidence - Using broader context approach")
+            
+            # For documents with low relevance, we'll use knowledge refinement 
+            # to extract anything potentially useful
+            all_key_points = []
+            for doc in retrieved_docs:
+                key_points = self.knowledge_refinement(doc.page_content)
+                all_key_points.extend(key_points)
+                
+                # Track source
+                if hasattr(doc, "metadata") and "source" in doc.metadata:
+                    source = doc.metadata["source"]
+                    if source not in sources:
+                        sources.append(source)
+            
+            final_knowledge_text = "\n".join([f"- {point}" for point in all_key_points])
         
-        # CRAG Step 4: Knowledge Stripping for granular relevance
-        if len(filtered_docs) > 0:
-            stripped_docs = self._knowledge_stripping(filtered_docs, enhanced_query)
         else:
-            stripped_docs = []
+            # Medium confidence - use a combination approach
+            print("Action: Medium Confidence - Using selective knowledge approach")
+            
+            # Sort documents by relevance score
+            sorted_docs = [doc for _, doc in sorted(
+                zip(eval_scores, retrieved_docs), 
+                key=lambda x: x[0], 
+                reverse=True
+            )]
+            
+            # Process top documents with knowledge refinement
+            all_key_points = []
+            for doc in sorted_docs[:3]:  # Focus on top 3 documents
+                key_points = self.knowledge_refinement(doc.page_content)
+                all_key_points.extend(key_points)
+                
+                # Track source
+                if hasattr(doc, "metadata") and "source" in doc.metadata:
+                    source = doc.metadata["source"]
+                    if source not in sources:
+                        sources.append(source)
+            
+            final_knowledge_text = "\n".join([f"- {point}" for point in all_key_points])
         
-        # If no documents survived the filtering process
-        if not stripped_docs:
-            return "I couldn't find information relevant to your query in my knowledge base.", []
+        # Convert the text to a Document object
+        final_knowledge = [Document(page_content=final_knowledge_text)]
         
-        # Create the prompt template with improved instructions
+        # Create the final prompt template with improved instructions, including Bengali support
+        bengali_system_prompt = """আপনি একজন জ্ঞানী সহকারী যিনি ব্যবহারকারীদের প্রযুক্তিগত নথি এবং গবেষণা পত্র থেকে তথ্য খুঁজতে সাহায্য করেন।
+        আপনার লক্ষ্য হল কেবল প্রদত্ত প্রসঙ্গের উপর ভিত্তি করে সঠিক, বিস্তারিত উত্তর প্রদান করা।
+        
+        আপনাকে অবশ্যই:
+        ১. শুধুমাত্র প্রদত্ত প্রসঙ্গ থেকে তথ্য ব্যবহার করতে হবে।
+        ২. আপনার ব্যাখ্যায় বিস্তারিত এবং সম্পূর্ণ হতে হবে।
+        ৩. যদি কোড বা অ্যালগরিদম সম্পর্কে জিজ্ঞাসা করা হয়, তবে প্রসঙ্গে উল্লেখিত বাস্তবায়ন বিবরণ ব্যাখ্যা করুন।
+        ৪. প্রাসঙ্গিক হলে নির্দিষ্ট বিভাগ বা পেপার উদ্ধৃত করুন।
+        ৫. স্বীকার করুন যখন তথ্য অসম্পূর্ণ হতে পারে।
+        ৬. যদি কোডের জন্য জিজ্ঞাসা করা হয় এবং প্রসঙ্গে কোড বা বিস্তারিত অ্যালগরিদম বর্ণনা থাকে, তবে একটি কাঠামোগত বিন্যাসে তা প্রদান করুন।
+        ৭. যদি উত্তর প্রসঙ্গে না থাকে, তবে বলুন "আমার কাছে এই প্রশ্নের সম্পূর্ণ উত্তর দেওয়ার জন্য জ্ঞান ভাণ্ডারে পর্যাপ্ত তথ্য নেই" এবং প্রসঙ্গ থেকে আপনি যা জানেন তা প্রদান করুন।
+        ৮. গুরুত্বপূর্ণ: সিস্টেম পুনরুদ্ধার করা তথ্যের আত্মবিশ্বাস নিম্নলিখিতভাবে মূল্যায়ন করেছে:
+        - উচ্চ আত্মবিশ্বাস (>০.৭): তথ্য অত্যন্ত প্রাসঙ্গিক
+        - মাঝারি আত্মবিশ্বাস (০.৩-০.৭): তথ্য আংশিকভাবে প্রাসঙ্গিক
+        - নিম্ন আত্মবিশ্বাস (<০.৩): তথ্য সরাসরি প্রাসঙ্গিক নাও হতে পারে
+        
+        প্রসঙ্গে উপস্থিত নয় এমন তথ্য তৈরি বা কল্পনা করবেন না।
+        
+        আপনার উত্তর বাংলায় প্রদান করুন, যা সুন্দর, শুদ্ধ বাংলা ভাষায় থাকবে। যেখানে প্রযুক্তিগত শব্দগুলির জন্য বাংলা প্রতিশব্দ নেই, সেখানে মূল ইংরেজি শব্দ ব্যবহার করুন এবং প্রয়োজনে বন্ধনীতে একটি বাংলা ব্যাখ্যা দিন।"""
+        
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a knowledgeable assistant that helps users find information from technical documents and research papers.
+            ("system", bengali_system_prompt if query_language == 'bengali' else 
+            """You are a knowledgeable assistant that helps users find information from technical documents and research papers.
             Your goal is to provide accurate, detailed answers based solely on the provided context.
             
             You must:
@@ -482,64 +454,47 @@ class RAGService:
             5. Acknowledge when information might be incomplete.
             6. If asked for code and the context contains code or detailed algorithm descriptions, provide it in a structured format.
             7. If the answer is not in the context, say "I don't have enough information in the knowledge base to answer this question completely" and provide what you do know from the context.
-            8. IMPORTANT: Evaluate the quality of retrieved context. If it seems irrelevant or inadequate, acknowledge this limitation in your response.
+            8. IMPORTANT: The system has assessed the confidence of the retrieved information as follows:
+            - High confidence (>0.7): Information is highly relevant
+            - Medium confidence (0.3-0.7): Information is partially relevant
+            - Low confidence (<0.3): Information may not be directly relevant
             
-            Do NOT make up or hallucinate information not present in the context."""),
+            IMPORTANT: Respond in Bengali with beautiful, proper Bengali language. Where technical terms don't have Bengali equivalents, use the original English term and provide a Bengali explanation in parentheses if needed."""),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
             ("system", """Base your answer exclusively on the following context:
             
-            {context}"""),
+            {context}
+            
+            Confidence level: {confidence_level}"""),
         ])
+        
+        # Determine confidence level message
+        if max_score > self.upper_threshold:
+            confidence_level = "High confidence - the information provided is highly relevant to the query"
+        elif max_score < self.lower_threshold:
+            confidence_level = "Low confidence - the information may not directly address the query"
+        else:
+            confidence_level = "Medium confidence - the information is partially relevant to the query"
         
         # Create the document chain
         document_chain = create_stuff_documents_chain(self.llm, prompt)
         
-        # CRAG Step 5: Generate Initial Answer
-        try:
-            chat_history_messages = self.memory.load_memory_variables({}).get("chat_history", [])
-            
-            initial_response = document_chain.invoke({
-                "input": query,
-                "chat_history": chat_history_messages,
-                "context": stripped_docs
-            })
-        except Exception as e:
-            print(f"Error generating initial response: {e}")
-            # Fallback to a simpler approach
-            context_text = "\n\n".join([doc.page_content for doc in stripped_docs])
-            system_prompt = f"""You are a helpful assistant answering a question based solely on the provided context.
-            
-            Context:
-            {context_text}
-            
-            Answer the following question using only information from the context. If the information isn't in the context, say you don't have enough information."""
-            
-            human_prompt = query
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": human_prompt}
-            ]
-            
-            response = self.llm.invoke(messages)
-            initial_response = response.content
+        # Process the query with memory and our processed knowledge
+        response = document_chain.invoke({
+            "input": query,
+            "chat_history": self.memory.load_memory_variables({})["chat_history"],
+            "context": final_knowledge,
+            "confidence_level": confidence_level
+        })
         
-        # CRAG Step 6: Answer Refinement (post-generation verification)
-        final_answer = self._answer_refinement(initial_response, query, stripped_docs)
+        # Ensure response is in Bengali if the query was in Bengali
+        # We don't need to translate here as the prompt already instructs the LLM to respond in Bengali
         
         # Save the interaction to memory
-        self.memory.save_context({"input": query}, {"answer": final_answer})
+        self.memory.save_context({"input": query}, {"answer": response})
         
-        # Extract sources if available
-        sources = []
-        for doc in stripped_docs:
-            if hasattr(doc, "metadata") and "source" in doc.metadata:
-                source = doc.metadata["source"]
-                if source not in sources:
-                    sources.append(source)
-        
-        return final_answer, sources
+        return response, sources
     
     def get_chat_history(self) -> List[Dict[str, str]]:
         """Get the current chat history as a list of message dictionaries"""
@@ -566,7 +521,7 @@ if __name__ == "__main__":
     print(f"Ingested {num_chunks} chunks.")
     
     # Process a query
-    answer, sources = rag_service.process_query("What is the significance of Agent in AI?")
+    answer, sources = rag_service.process_query("Explain me Agent?")
     print(f"Answer: {answer}")
     print(f"Sources: {sources}")
     

@@ -5,14 +5,36 @@ from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.chains import create_retrieval_chain
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import SystemMessage, HumanMessage, AIMessage
-from langchain.retrievers.document_compressors import EmbeddingsFilter
+from langchain.prompts import PromptTemplate
+from langchain.schema.document import Document
+from langchain.retrievers.document_compressors import EmbeddingsFilter, LLMChainExtractor
+from langchain.retrievers import ContextualCompressionRetriever
+from pydantic import BaseModel, Field
 from app.core.config import settings
 from typing import List, Tuple, Dict, Any, Optional
+
+class RetrievalEvaluatorInput(BaseModel):
+    """
+    Model for capturing the relevance score of a document to a query.
+    """
+    relevance_score: float = Field(..., description="Relevance score between 0 and 1, "
+                                                   "indicating the document's relevance to the query.")
+
+class QueryRewriterInput(BaseModel):
+    """
+    Model for capturing a rewritten query suitable for web search.
+    """
+    query: str = Field(..., description="The query rewritten for better search results.")
+
+class KnowledgeRefinementInput(BaseModel):
+    """
+    Model for extracting key points from a document.
+    """
+    key_points: str = Field(..., description="Key information extracted from the document in bullet-point form.")
 
 class RAGService:
     def __init__(self):
@@ -20,6 +42,10 @@ class RAGService:
         self.vector_store = self._initialize_or_load_vector_store()
         self.llm = self._initialize_llm()
         self.memory = self._initialize_memory()
+        
+        # Thresholds for CRAG implementation
+        self.lower_threshold = 0.3
+        self.upper_threshold = 0.7
     
     def _initialize_embeddings(self):
         return HuggingFaceEmbeddings(
@@ -67,63 +93,43 @@ class RAGService:
             output_key="answer"
         )
     
-    def _create_retrieval_evaluator(self):
+    def retrieval_evaluator(self, query, document):
         """
-        Create a retrieval evaluator to assess document quality.
-        Part of the CRAG implementation for quality assessment.
+        Evaluate the relevance of a document to a query.
+        Returns a relevance score between 0 and 1.
         """
-        # Define a prompt for the evaluator
-        evaluator_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a document relevance evaluator. Your job is to determine how relevant 
-            the retrieved documents are to the user's query. Score each document from 0-10, where:
-            - 0-3: Irrelevant or barely related
-            - 4-6: Somewhat relevant but missing key information
-            - 7-10: Highly relevant and contains needed information
-            
-            Only provide a numerical score with a brief one-sentence justification."""),
-            ("human", "Query: {query}\n\nDocument: {document_content}\n\nRelevance score (0-10):"),
-        ])
-        
-        # Create an evaluator chain
-        return create_stuff_documents_chain(self.llm, evaluator_prompt)
+        prompt = PromptTemplate(
+            input_variables=["query", "document"],
+            template="On a scale from 0 to 1, how relevant is the following document to the query? "
+                     "Query: {query}\nDocument: {document}\nRelevance score:"
+        )
+        chain = prompt | self.llm.with_structured_output(RetrievalEvaluatorInput)
+        input_variables = {"query": query, "document": document}
+        result = chain.invoke(input_variables).relevance_score
+        return result
     
-    def _perform_knowledge_stripping(self, documents, query):
-        """
-        Break documents into smaller segments and grade them for relevance.
-        Part of the CRAG implementation for knowledge stripping.
-        """
-        # First break into smaller segments if the documents are large
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300,  # Smaller chunks for more granular relevance assessment
-            chunk_overlap=50
+    def knowledge_refinement(self, document):
+        """Extract key points from a document in bullet-point form."""
+        prompt = PromptTemplate(
+            input_variables=["document"],
+            template="Extract the key information from the following document in bullet points:"
+                     "\n{document}\nKey points:"
         )
-        
-        # Create smaller segments from the retrieved documents
-        small_chunks = []
-        for doc in documents:
-            smaller_docs = text_splitter.split_text(doc.page_content)
-            for i, chunk in enumerate(smaller_docs):
-                small_chunks.append({
-                    "content": chunk,
-                    "metadata": doc.metadata,
-                    "original_index": documents.index(doc),
-                    "chunk_index": i
-                })
-        
-        # Use embeddings to filter the most relevant chunks
-        embeddings_filter = EmbeddingsFilter(
-            embeddings=self.embeddings,
-            similarity_threshold=0.76  # Adjust based on your needs
+        chain = prompt | self.llm.with_structured_output(KnowledgeRefinementInput)
+        input_variables = {"document": document}
+        result = chain.invoke(input_variables).key_points
+        return [point.strip() for point in result.split('\n') if point.strip()]
+    
+    def rewrite_query(self, query):
+        """Rewrite a query to make it more suitable for retrieval."""
+        prompt = PromptTemplate(
+            input_variables=["query"],
+            template="Rewrite the following query to make it more suitable for document retrieval:"
+                     "\n{query}\nRewritten query:"
         )
-        
-        # This is a simplified approach - in a full implementation, you would:
-        # 1. Create document objects from small_chunks
-        # 2. Pass them through the embeddings filter
-        # 3. Score them using the evaluator
-        # 4. Keep only the most relevant ones
-        
-        # For now, we'll use a simple embedding similarity as our filter
-        return [doc for i, doc in enumerate(documents) if i < min(len(documents), 5)]  # Just return top 5 for demonstration
+        chain = prompt | self.llm.with_structured_output(QueryRewriterInput)
+        input_variables = {"query": query}
+        return chain.invoke(input_variables).query.strip()
     
     def ingest_documents(self, directory_path: str, specific_files: Optional[List[str]] = None):
         """
@@ -214,75 +220,192 @@ class RAGService:
             elif message.get("role") == "system":
                 self.memory.chat_memory.add_message(SystemMessage(content=message.get("content", "")))
     
-    def process_query(self, query: str, chat_history: Optional[List[Dict[str, Any]]] = None) -> Tuple[str, List[str]]:
-        """Process a query using Corrective RAG (CRAG) and return the answer and sources."""
-        # Load chat history into memory if provided
-        self.load_chat_history(chat_history)
-        
-        # Create a basic retriever
+    def create_contextually_compressed_retriever(self, query):
+        """
+        Create a contextually compressed retriever that combines CRAG evaluation
+        with contextual compression techniques.
+        """
+        # First, create base retriever
         base_retriever = self.vector_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": settings.TOP_K_RESULTS}
         )
         
-        # Implement the Corrective RAG approach
+        # Create document compressors
         
-        # Step 1: Retrieve initial documents
-        initial_docs = base_retriever.get_relevant_documents(query)
+        # 1. Embeddings filter to remove irrelevant portions
+        embeddings_filter = EmbeddingsFilter(
+            embeddings=self.embeddings,
+            similarity_threshold=0.75  # Adjust threshold as needed
+        )
         
-        # Step 2: Document quality assessment using the retrieval evaluator
-        # (In a full implementation, you would score each document)
+        # 2. LLM extractor to pull out only the most relevant information
         
-        # Step 3: Knowledge stripping - break documents into smaller segments and filter
-        filtered_docs = self._perform_knowledge_stripping(initial_docs, query)
+        # Modified to accept 'question' and 'context' instead of 'query' and 'document'
+        extractor_prompt = PromptTemplate(
+            input_variables=["question", "context"],
+            template="""Given the following question and context, extract only the parts of the context 
+            that are directly relevant to answering the question. Focus on maintaining key information while removing 
+            irrelevant content.
+            
+            Question: {question}
+            Context: {context}
+            
+            Relevant content:"""
+        )
         
-        # Create the prompt template with improved instructions
+        llm_extractor = LLMChainExtractor.from_llm(
+            self.llm,
+            prompt=extractor_prompt
+        )
+        
+        # Chain the compressors
+        from langchain.retrievers.document_compressors import DocumentCompressorPipeline
+        compression_pipeline = DocumentCompressorPipeline(
+            transformers=[embeddings_filter, llm_extractor]
+        )
+        
+        # Create contextual compression retriever
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compression_pipeline,
+            base_retriever=base_retriever
+        )
+        
+        return compression_retriever
+    
+    def process_query(self, query: str, chat_history: Optional[List[Dict[str, Any]]] = None) -> Tuple[str, List[str]]:
+        """Process a query using Combined CRAG and Contextual Compression RAG."""
+        # Load chat history into memory if provided
+        self.load_chat_history(chat_history)
+        
+        # Step 1: Query rewriting (from CRAG) to improve retrieval
+        rewritten_query = self.rewrite_query(query)
+        print(f"Original query: {query}")
+        print(f"Rewritten query: {rewritten_query}")
+        
+        # Step 2: Retrieve documents using contextual compression
+        compression_retriever = self.create_contextually_compressed_retriever(rewritten_query)
+        retrieved_docs = compression_retriever.invoke(rewritten_query)  # Updated to use invoke
+        
+        # Step 3: Evaluate document relevance (from CRAG)
+        eval_scores = [self.retrieval_evaluator(query, doc.page_content) for doc in retrieved_docs]
+        print(f"Evaluation scores: {eval_scores}")
+        
+        # Step 4: Implement CRAG's adaptive retrieval strategy based on confidence
+        max_score = max(eval_scores) if eval_scores else 0
+        sources = []
+        final_knowledge_text = ""  # Initialize this variable
+        
+        if max_score > self.upper_threshold:
+            # High confidence - use best document directly
+            print("Action: High Confidence - Using top retrieved document")
+            best_doc_index = eval_scores.index(max_score)
+            best_doc = retrieved_docs[best_doc_index]
+            
+            # Extract key knowledge using knowledge refinement
+            key_points = self.knowledge_refinement(best_doc.page_content)
+            final_knowledge_text = "\n".join([f"- {point}" for point in key_points])
+            
+            # Track source
+            if hasattr(best_doc, "metadata") and "source" in best_doc.metadata:
+                sources.append(best_doc.metadata["source"])
+        
+        elif max_score < self.lower_threshold:
+            # Low confidence - reformulate approach
+            print("Action: Low Confidence - Using broader context approach")
+            
+            # For documents with low relevance, we'll use knowledge refinement 
+            # to extract anything potentially useful
+            all_key_points = []
+            for doc in retrieved_docs:
+                key_points = self.knowledge_refinement(doc.page_content)
+                all_key_points.extend(key_points)
+                
+                # Track source
+                if hasattr(doc, "metadata") and "source" in doc.metadata:
+                    source = doc.metadata["source"]
+                    if source not in sources:
+                        sources.append(source)
+            
+            final_knowledge_text = "\n".join([f"- {point}" for point in all_key_points])
+        
+        else:
+            # Medium confidence - use a combination approach
+            print("Action: Medium Confidence - Using selective knowledge approach")
+            
+            # Sort documents by relevance score
+            sorted_docs = [doc for _, doc in sorted(
+                zip(eval_scores, retrieved_docs), 
+                key=lambda x: x[0], 
+                reverse=True
+            )]
+            
+            # Process top documents with knowledge refinement
+            all_key_points = []
+            for doc in sorted_docs[:3]:  # Focus on top 3 documents
+                key_points = self.knowledge_refinement(doc.page_content)
+                all_key_points.extend(key_points)
+                
+                # Track source
+                if hasattr(doc, "metadata") and "source" in doc.metadata:
+                    source = doc.metadata["source"]
+                    if source not in sources:
+                        sources.append(source)
+            
+            final_knowledge_text = "\n".join([f"- {point}" for point in all_key_points])
+        
+        # Convert the text to a Document object
+        final_knowledge = [Document(page_content=final_knowledge_text)]
+        
+        # Create the final prompt template with improved instructions
         prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are a knowledgeable assistant that helps users find information from technical documents and research papers.
-                Your goal is to provide accurate, detailed answers based solely on the provided context.
-                
-                You must:
-                1. Only use information from the provided context.
-                2. Be comprehensive and detailed in your explanations.
-                3. If asked about code or algorithms, explain the implementation details if they appear in the context.
-                4. Cite specific sections or papers when relevant.
-                5. Acknowledge when information might be incomplete.
-                6. If asked for code and the context contains code or detailed algorithm descriptions, provide it in a structured format.
-                7. If the answer is not in the context, say "I don't have enough information in the knowledge base to answer this question completely" and provide what you do know from the context.
-                8. IMPORTANT: Evaluate the quality of retrieved context. If it seems irrelevant or inadequate, acknowledge this limitation in your response.
-                
-                Do NOT make up or hallucinate information not present in the context."""),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{input}"),
-                ("system", """Base your answer exclusively on the following context:
-                
-                {context}"""),
-            ])
+            ("system", """You are a knowledgeable assistant that helps users find information from technical documents and research papers.
+            Your goal is to provide accurate, detailed answers based solely on the provided context.
+            
+            You must:
+            1. Only use information from the provided context.
+            2. Be comprehensive and detailed in your explanations.
+            3. If asked about code or algorithms, explain the implementation details if they appear in the context.
+            4. Cite specific sections or papers when relevant.
+            5. Acknowledge when information might be incomplete.
+            6. If asked for code and the context contains code or detailed algorithm descriptions, provide it in a structured format.
+            7. If the answer is not in the context, say "I don't have enough information in the knowledge base to answer this question completely" and provide what you do know from the context.
+            8. IMPORTANT: The system has assessed the confidence of the retrieved information as follows:
+            - High confidence (>0.7): Information is highly relevant
+            - Medium confidence (0.3-0.7): Information is partially relevant
+            - Low confidence (<0.3): Information may not be directly relevant
+            
+            Do NOT make up or hallucinate information not present in the context."""),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+            ("system", """Base your answer exclusively on the following context:
+            
+            {context}
+            
+            Confidence level: {confidence_level}"""),
+        ])
+        
+        # Determine confidence level message
+        if max_score > self.upper_threshold:
+            confidence_level = "High confidence - the information provided is highly relevant to the query"
+        elif max_score < self.lower_threshold:
+            confidence_level = "Low confidence - the information may not directly address the query"
+        else:
+            confidence_level = "Medium confidence - the information is partially relevant to the query"
         
         # Create the document chain
         document_chain = create_stuff_documents_chain(self.llm, prompt)
         
-        # Instead of creating a standard retrieval chain, we'll process directly with filtered docs
-        # This simulates what the contextual compression retriever would do
-        context = "\n\n".join([doc.page_content for doc in filtered_docs])
-        
-        # Process the query with memory
+        # Process the query with memory and our processed knowledge
         response = document_chain.invoke({
             "input": query,
             "chat_history": self.memory.load_memory_variables({})["chat_history"],
-            "context": filtered_docs
+            "context": final_knowledge,
+            "confidence_level": confidence_level
         })
         
         # Save the interaction to memory
         self.memory.save_context({"input": query}, {"answer": response})
-        
-        # Extract sources if available
-        sources = []
-        for doc in filtered_docs:
-            if hasattr(doc, "metadata") and "source" in doc.metadata:
-                source = doc.metadata["source"]
-                if source not in sources:
-                    sources.append(source)
         
         return response, sources
     
