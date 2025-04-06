@@ -1,12 +1,12 @@
-"use client";
+"use client"
 
-import { useState, useRef, useEffect } from "react";
+import type React from "react"
+
+import { useState, useRef, useEffect } from "react"
 import {
   Bot,
   User,
-  Send,
   Loader2,
-  Plus,
   Menu,
   X,
   Book,
@@ -18,89 +18,87 @@ import {
   Trash2,
   Sparkles,
   ArrowRight,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import rehypeHighlight from "rehype-highlight";
-import "katex/dist/katex.min.css";
-import "highlight.js/styles/github-dark.css";
-import { useTheme } from "next-themes";
-import { motion, AnimatePresence } from "framer-motion";
-import { cn } from "@/libs/utils";
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import ReactMarkdown from "react-markdown"
+import remarkMath from "remark-math"
+import rehypeKatex from "rehype-katex"
+import rehypeHighlight from "rehype-highlight"
+import "katex/dist/katex.min.css"
+import "highlight.js/styles/github-dark.css"
+import { useTheme } from "next-themes"
+import { motion, AnimatePresence } from "framer-motion"
+import { cn } from "@/libs/utils"
 
 type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  sources?: string[];
-  isTyping?: boolean;
-};
+  id: string
+  role: "user" | "assistant"
+  content: string
+  sources?: string[]
+  isTyping?: boolean
+}
 
 type ChatSession = {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: Date;
-};
+  id: string
+  title: string
+  messages: Message[]
+  createdAt: Date
+}
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
 
 export default function ModernChatInterface() {
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isTypingAnimation, setIsTypingAnimation] = useState(false);
-  const [currentTypingMessage, setCurrentTypingMessage] = useState<string>("");
-  const [typingIndex, setTypingIndex] = useState(0);
-  const { theme, setTheme } = useTheme();
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  const [isBrowser, setIsBrowser] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [isTypingAnimation, setIsTypingAnimation] = useState(false)
+  const [currentTypingMessage, setCurrentTypingMessage] = useState<string>("")
+  const [typingIndex, setTypingIndex] = useState(0)
+  const { theme, setTheme } = useTheme()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
+  const [isBrowser, setIsBrowser] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   useEffect(() => {
-    setIsBrowser(true);
-  }, []);
+    setIsBrowser(true)
+  }, [])
 
   // Initialize with a new session on first load
   useEffect(() => {
     if (sessions.length === 0) {
-      const newSessionId = Date.now().toString();
+      const newSessionId = Date.now().toString()
       const newSession: ChatSession = {
         id: newSessionId,
         title: "New Chat",
         messages: [],
         createdAt: new Date(),
-      };
-      setSessions([newSession]);
-      setActiveSessionId(newSessionId);
+      }
+      setSessions([newSession])
+      setActiveSessionId(newSessionId)
     }
-  }, [sessions]);
+  }, [sessions])
 
   // Load the active session's messages
   useEffect(() => {
     if (activeSessionId) {
-      const activeSession = sessions.find(
-        (session) => session.id === activeSessionId
-      );
+      const activeSession = sessions.find((session) => session.id === activeSessionId)
       if (activeSession) {
-        setMessages(activeSession.messages);
+        setMessages(activeSession.messages)
       }
     }
-  }, [activeSessionId, sessions]);
+  }, [activeSessionId, sessions])
 
   // Add custom styling
   useEffect(() => {
-    const style = document.createElement("style");
+    const style = document.createElement("style")
     style.innerHTML = `
       @keyframes blink {
         0%, 100% { opacity: 1; }
@@ -170,75 +168,99 @@ export default function ModernChatInterface() {
         padding: 1rem !important;
         border-radius: 0.5rem;
       }
-    `;
-    document.head.appendChild(style);
+
+      /* Custom scrollbar styling */
+      .chat-scrollbar::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+
+      .chat-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .chat-scrollbar::-webkit-scrollbar-thumb {
+        background-color: rgba(155, 155, 155, 0.5);
+        border-radius: 20px;
+      }
+
+      .chat-scrollbar::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(155, 155, 155, 0.7);
+      }
+
+      .chat-scrollbar {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+      }
+
+      /* Ensure scrollbar is always on the right */
+      .chat-scrollbar {
+        overflow-y: scroll;
+        margin-right: 0;
+        padding-right: 0;
+      }
+    `
+    document.head.appendChild(style)
 
     return () => {
-      document.head.removeChild(style);
-    };
-  }, []);
+      document.head.removeChild(style)
+    }
+  }, [])
 
   // Text typing animation effect
   useEffect(() => {
     if (isTypingAnimation && currentTypingMessage) {
       const timer = setTimeout(() => {
-        setIsTypingAnimation(false);
-        setMessages((prev) =>
-          prev.map((msg) => (msg.isTyping ? { ...msg, isTyping: false } : msg))
-        );
-      }, 500);
+        setIsTypingAnimation(false)
+        setMessages((prev) => prev.map((msg) => (msg.isTyping ? { ...msg, isTyping: false } : msg)))
+      }, 500)
 
-      return () => clearTimeout(timer);
+      return () => clearTimeout(timer)
     }
-  }, [isTypingAnimation, currentTypingMessage]);
+  }, [isTypingAnimation, currentTypingMessage])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = "60px";
-      textareaRef.current.style.height = `${Math.min(
-        textareaRef.current.scrollHeight,
-        200
-      )}px`;
+      textareaRef.current.style.height = "60px"
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
     }
-  }, [input]);
+  }, [input])
 
   const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
+    fileInputRef.current?.click()
+  }
 
-  const handleFileSelection = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleFileSelection = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
 
-    setIsUploading(true);
-    setIsSidebarOpen(false);
+    setIsUploading(true)
+    setIsSidebarOpen(false)
 
     try {
-      const formData = new FormData();
+      const formData = new FormData()
       Array.from(files).forEach((file) => {
-        formData.append("files", file);
-      });
+        formData.append("files", file)
+      })
 
       const response = await fetch(`${API_URL}/upload`, {
         method: "POST",
         body: formData,
-      });
+      })
 
-      if (!response.ok) throw new Error("Upload failed");
-      handleUploadSuccess();
+      if (!response.ok) throw new Error("Upload failed")
+      handleUploadSuccess()
     } catch (error) {
-      console.error("Upload error:", error);
+      console.error("Upload error:", error)
     } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setIsUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
-  };
+  }
 
   const handleUploadSuccess = () => {
     const systemMessage: Message = {
@@ -246,48 +268,48 @@ export default function ModernChatInterface() {
       role: "assistant",
       content:
         "New documents have been added to the knowledge base and are being processed. You can now ask questions about the new content!",
-    };
+    }
 
     if (activeSessionId) {
-      const newMessages = [...messages, systemMessage];
-      setMessages(newMessages);
-      saveMessagesToSession(activeSessionId, newMessages);
+      const newMessages = [...messages, systemMessage]
+      setMessages(newMessages)
+      saveMessagesToSession(activeSessionId, newMessages)
     }
-  };
+  }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-  };
+    setInput(e.target.value)
+  }
 
   const getChatHistory = () => {
     return messages.map((msg) => ({
       role: msg.role,
       content: msg.content,
-    }));
-  };
+    }))
+  }
 
   const simulateTypingAnimation = (content: string) => {
-    setCurrentTypingMessage(content);
-    setTypingIndex(0);
-    setIsTypingAnimation(true);
-  };
+    setCurrentTypingMessage(content)
+    setTypingIndex(0)
+    setIsTypingAnimation(true)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault()
 
-    if (!input.trim() || !activeSessionId) return;
+    if (!input.trim() || !activeSessionId) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
       content: input.trim(),
-    };
+    }
 
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
-    saveMessagesToSession(activeSessionId, updatedMessages);
-    setInput("");
-    setIsLoading(true);
+    const updatedMessages = [...messages, userMessage]
+    setMessages(updatedMessages)
+    saveMessagesToSession(activeSessionId, updatedMessages)
+    setInput("")
+    setIsLoading(true)
 
     try {
       const response = await fetch(`${API_URL}/chat`, {
@@ -299,10 +321,10 @@ export default function ModernChatInterface() {
           query: input.trim(),
           chat_history: getChatHistory(),
         }),
-      });
+      })
 
-      if (!response.ok) throw new Error(`API error: ${response.status}`);
-      const data = await response.json();
+      if (!response.ok) throw new Error(`API error: ${response.status}`)
+      const data = await response.json()
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -310,108 +332,83 @@ export default function ModernChatInterface() {
         content: data.response,
         sources: data.sources || [],
         isTyping: true,
-      };
+      }
 
-      const newUpdatedMessages = [...updatedMessages, assistantMessage];
-      setMessages(newUpdatedMessages);
-      saveMessagesToSession(activeSessionId, newUpdatedMessages);
-      simulateTypingAnimation(data.response);
-      generateChatTitle(
-        activeSessionId,
-        userMessage.content,
-        assistantMessage.content
-      );
+      const newUpdatedMessages = [...updatedMessages, assistantMessage]
+      setMessages(newUpdatedMessages)
+      saveMessagesToSession(activeSessionId, newUpdatedMessages)
+      simulateTypingAnimation(data.response)
+      generateChatTitle(activeSessionId, userMessage.content, assistantMessage.content)
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error:", error)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content:
-          "Sorry, I encountered an error while processing your request. Please try again later.",
-      };
+        content: "Sorry, I encountered an error while processing your request. Please try again later.",
+      }
 
-      const newUpdatedMessages = [...updatedMessages, errorMessage];
-      setMessages(newUpdatedMessages);
-      saveMessagesToSession(activeSessionId, newUpdatedMessages);
+      const newUpdatedMessages = [...updatedMessages, errorMessage]
+      setMessages(newUpdatedMessages)
+      saveMessagesToSession(activeSessionId, newUpdatedMessages)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
-  const generateChatTitle = async (
-    sessionId: string,
-    userQuery: string,
-    aiResponse: string
-  ) => {
-    const session = sessions.find((s) => s.id === sessionId);
-    if (
-      session &&
-      session.title === "New Chat" &&
-      session.messages.length === 0
-    ) {
-      const title =
-        userQuery.length > 30 ? userQuery.substring(0, 30) + "..." : userQuery;
+  const generateChatTitle = async (sessionId: string, userQuery: string, aiResponse: string) => {
+    const session = sessions.find((s) => s.id === sessionId)
+    if (session && session.title === "New Chat" && session.messages.length === 0) {
+      const title = userQuery.length > 30 ? userQuery.substring(0, 30) + "..." : userQuery
 
-      setSessions((prev) =>
-        prev.map((s) => (s.id === sessionId ? { ...s, title } : s))
-      );
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)))
     }
-  };
+  }
 
-  const saveMessagesToSession = (
-    sessionId: string,
-    updatedMessages: Message[]
-  ) => {
+  const saveMessagesToSession = (sessionId: string, updatedMessages: Message[]) => {
     setSessions((prev) =>
-      prev.map((session) =>
-        session.id === sessionId
-          ? { ...session, messages: updatedMessages }
-          : session
-      )
-    );
-  };
+      prev.map((session) => (session.id === sessionId ? { ...session, messages: updatedMessages } : session)),
+    )
+  }
 
   const startNewChat = () => {
-    const newSessionId = Date.now().toString();
+    const newSessionId = Date.now().toString()
     const newSession: ChatSession = {
       id: newSessionId,
       title: "New Chat",
       messages: [],
       createdAt: new Date(),
-    };
-    setSessions((prev) => [newSession, ...prev]);
-    setActiveSessionId(newSessionId);
-    setMessages([]);
-  };
+    }
+    setSessions((prev) => [newSession, ...prev])
+    setActiveSessionId(newSessionId)
+    setMessages([])
+  }
 
   const switchSession = (sessionId: string) => {
-    setActiveSessionId(sessionId);
-    setIsSidebarOpen(false);
-  };
+    setActiveSessionId(sessionId)
+    setIsSidebarOpen(false)
+  }
 
   const deleteSession = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSessions((prev) => prev.filter((session) => session.id !== sessionId));
+    e.stopPropagation()
+    setSessions((prev) => prev.filter((session) => session.id !== sessionId))
 
     if (sessionId === activeSessionId) {
-      const remainingSessions = sessions.filter(
-        (session) => session.id !== sessionId
-      );
+      const remainingSessions = sessions.filter((session) => session.id !== sessionId)
       if (remainingSessions.length > 0) {
-        setActiveSessionId(remainingSessions[0].id);
+        setActiveSessionId(remainingSessions[0].id)
       } else {
-        startNewChat();
+        startNewChat()
       }
     }
-  };
+  }
 
   const toggleTheme = () => {
-    setTheme(theme === "dark" ? "light" : "dark");
-  };
+    setTheme(theme === "dark" ? "light" : "dark")
+  }
 
   const toggleSidebar = () => {
-    setIsSidebarCollapsed(!isSidebarCollapsed);
-  };
+    setIsSidebarCollapsed(!isSidebarCollapsed)
+  }
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat("en-US", {
@@ -419,8 +416,8 @@ export default function ModernChatInterface() {
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    }).format(date);
-  };
+    }).format(date)
+  }
 
   // Updated renderTypingAnimation function with proper type checking
   const renderTypingAnimation = (content: string) => {
@@ -436,12 +433,10 @@ export default function ModernChatInterface() {
           rehypePlugins={[rehypeKatex, rehypeHighlight]}
           components={{
             code({ node, inline, className, children, ...props }: any) {
-              const match = /language-(\w+)/.exec(className || "");
+              const match = /language-(\w+)/.exec(className || "")
               return !inline && match ? (
                 <div className="relative my-4">
-                  <div className="absolute right-2 top-2 text-xs text-muted-foreground">
-                    {match[1]}
-                  </div>
+                  <div className="absolute right-2 top-2 text-xs text-muted-foreground">{match[1]}</div>
                   <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto">
                     <code className={`language-${match[1]}`} {...props}>
                       {children}
@@ -449,13 +444,10 @@ export default function ModernChatInterface() {
                   </pre>
                 </div>
               ) : (
-                <code
-                  className="bg-muted px-1.5 py-0.5 rounded text-sm"
-                  {...props}
-                >
+                <code className="bg-muted px-1.5 py-0.5 rounded text-sm" {...props}>
                   {children}
                 </code>
-              );
+              )
             },
             // Fix for math display
             div: ({ node, className, children, ...props }: any) => {
@@ -464,20 +456,16 @@ export default function ModernChatInterface() {
                 ? Array.isArray(node.properties.className)
                   ? node.properties.className.includes("math-display")
                   : node.properties.className.includes("math-display")
-                : false;
+                : false
 
               if (isMathDisplay) {
-                return (
-                  <div className="math-display overflow-x-auto py-2 my-4">
-                    {children}
-                  </div>
-                );
+                return <div className="math-display overflow-x-auto py-2 my-4">{children}</div>
               }
               return (
                 <div className={className} {...props}>
                   {children}
                 </div>
-              );
+              )
             },
             // Fix for inline math
             span: ({ node, className, children, ...props }: any) => {
@@ -486,30 +474,26 @@ export default function ModernChatInterface() {
                 ? Array.isArray(node.properties.className)
                   ? node.properties.className.includes("math-inline")
                   : node.properties.className.includes("math-inline")
-                : false;
+                : false
 
               if (isMathInline) {
-                return (
-                  <span className="math-inline mx-1 inline-block">
-                    {children}
-                  </span>
-                );
+                return <span className="math-inline mx-1 inline-block">{children}</span>
               }
               return (
                 <span className={className} {...props}>
                   {children}
                 </span>
-              );
+              )
             },
           }}
         >
           {content}
         </ReactMarkdown>
       </motion.div>
-    );
-  };
+    )
+  }
 
-  const isDesktop = isBrowser ? window.innerWidth >= 768 : false;
+  const isDesktop = isBrowser ? window.innerWidth >= 768 : false
 
   return (
     <div className="flex h-[100dvh] bg-background text-foreground overflow-hidden">
@@ -535,11 +519,7 @@ export default function ModernChatInterface() {
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="rounded-full bg-background/90 backdrop-blur-md shadow-lg"
           >
-            {isSidebarOpen ? (
-              <X className="h-5 w-5" />
-            ) : (
-              <Menu className="h-5 w-5" />
-            )}
+            {isSidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </motion.div>
       </AnimatePresence>
@@ -553,13 +533,13 @@ export default function ModernChatInterface() {
         transition={{ duration: 0.3, ease: "easeInOut" }}
         className={cn(
           "border-r border-border flex-shrink-0 flex flex-col",
-          "fixed md:static inset-y-0 left-0 z-40 bg-background/95 backdrop-blur-md"
+          "fixed md:static inset-y-0 left-0 z-40 bg-background/95 backdrop-blur-md",
         )}
       >
         <div
           className={cn(
             "border-b border-border/50 flex items-center py-4",
-            isSidebarCollapsed ? "justify-center px-2" : "px-4"
+            isSidebarCollapsed ? "justify-center px-2" : "px-4",
           )}
         >
           {!isSidebarCollapsed ? (
@@ -605,7 +585,7 @@ export default function ModernChatInterface() {
           )}
         </div>
 
-        <div className="flex-1 overflow-auto p-2 chat-scrollbar">
+        <div className="flex-1 overflow-y-auto p-2 chat-scrollbar">
           <AnimatePresence>
             {!isSidebarCollapsed && (
               <motion.div
@@ -616,9 +596,7 @@ export default function ModernChatInterface() {
                 className="space-y-1 mt-2"
               >
                 <div className="mb-4">
-                  <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-2">
-                    Chat History
-                  </h3>
+                  <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-2">Chat History</h3>
                   <motion.div
                     className="space-y-1"
                     initial="hidden"
@@ -642,21 +620,16 @@ export default function ModernChatInterface() {
                           "group w-full text-left rounded-xl flex items-center gap-2 text-sm transition-all",
                           activeSessionId === session.id
                             ? "bg-primary/10 text-primary shadow-md"
-                            : "hover:bg-muted text-foreground"
+                            : "hover:bg-muted text-foreground",
                         )}
                       >
                         <button
                           className="flex-1 flex items-start gap-2 p-3 truncate text-left"
                           onClick={() => switchSession(session.id)}
                         >
-                          <MessageSquare
-                            size={16}
-                            className="mt-0.5 flex-shrink-0"
-                          />
+                          <MessageSquare size={16} className="mt-0.5 flex-shrink-0" />
                           <div className="flex-1 flex flex-col overflow-hidden">
-                            <span className="truncate font-medium">
-                              {session.title}
-                            </span>
+                            <span className="truncate font-medium">{session.title}</span>
                             <span className="text-xs text-muted-foreground truncate">
                               {formatDate(session.createdAt)}
                             </span>
@@ -680,13 +653,7 @@ export default function ModernChatInterface() {
           </AnimatePresence>
         </div>
 
-        <div
-          className={cn(
-            "border-t border-border/50",
-            isSidebarCollapsed ? "p-2" : "p-4",
-            "space-y-4"
-          )}
-        >
+        <div className={cn("border-t border-border/50", isSidebarCollapsed ? "p-2" : "p-4", "space-y-4")}>
           {!isSidebarCollapsed ? (
             <>
               <div className="mb-4">
@@ -697,9 +664,7 @@ export default function ModernChatInterface() {
                   disabled={isUploading}
                 >
                   <Upload size={16} />
-                  <span>
-                    {isUploading ? "Uploading..." : "Upload Documents"}
-                  </span>
+                  <span>{isUploading ? "Uploading..." : "Upload Documents"}</span>
                 </Button>
               </div>
               <Button
@@ -735,22 +700,14 @@ export default function ModernChatInterface() {
                 disabled={isUploading}
                 title="Upload documents"
               >
-                {isUploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload size={16} />
-                )}
+                {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload size={16} />}
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
                 className="w-full flex justify-center text-muted-foreground hover:bg-muted transition-colors rounded-full"
                 onClick={toggleTheme}
-                title={
-                  theme === "dark"
-                    ? "Switch to light mode"
-                    : "Switch to dark mode"
-                }
+                title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
               >
                 {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
               </Button>
@@ -779,10 +736,7 @@ export default function ModernChatInterface() {
           <div className="absolute top-1/4 -left-32 w-64 h-64 bg-primary/5 rounded-full blur-3xl"></div>
         </div>
 
-        <div
-          ref={chatContainerRef}
-          className="flex-1 overflow-auto py-6 px-3 md:px-6 chat-scrollbar relative"
-        >
+        <div ref={chatContainerRef} className="flex-1 overflow-y-auto py-6 px-3 md:px-6 chat-scrollbar relative">
           {messages.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -801,12 +755,9 @@ export default function ModernChatInterface() {
                 Personal Knowledge Assistant
               </h1>
               <div className="max-w-md text-center text-muted-foreground">
-                <p className="text-lg">
-                  Ask me anything from your knowledge base.
-                </p>
+                <p className="text-lg">Ask me anything from your knowledge base.</p>
                 <p className="mt-2">
-                  Use the <span className="font-medium">Upload</span> button to
-                  add new documents.
+                  Use the <span className="font-medium">Upload</span> button to add new documents.
                 </p>
               </div>
             </motion.div>
@@ -820,11 +771,9 @@ export default function ModernChatInterface() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
                     className={cn(
-                      "message-bubble flex max-w-[85%] md:max-w-[75%] items-start gap-4 px-4 py-4 shadow-sm",
-                      message.role === "user"
-                        ? "bg-primary/5 ml-auto"
-                        : "bg-card/95 mr-auto",
-                      message.isTyping && "glassmorphism"
+                      "message-bubble flex w-full items-start gap-4 px-4 py-4",
+                      message.role === "user" ? "bg-primary/5" : "bg-card/95",
+                      message.isTyping && "glassmorphism",
                     )}
                   >
                     <div className="flex-shrink-0 mt-1">
@@ -848,100 +797,58 @@ export default function ModernChatInterface() {
                           remarkPlugins={[remarkMath]}
                           rehypePlugins={[rehypeKatex, rehypeHighlight]}
                           components={{
-                            code({
-                              node,
-                              inline,
-                              className,
-                              children,
-                              ...props
-                            }: any) {
-                              const match = /language-(\w+)/.exec(
-                                className || ""
-                              );
+                            code({ node, inline, className, children, ...props }: any) {
+                              const match = /language-(\w+)/.exec(className || "")
                               return !inline && match ? (
                                 <div className="relative my-4">
-                                  <div className="absolute right-2 top-2 text-xs text-muted-foreground">
-                                    {match[1]}
-                                  </div>
+                                  <div className="absolute right-2 top-2 text-xs text-muted-foreground">{match[1]}</div>
                                   <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto">
-                                    <code
-                                      className={`language-${match[1]}`}
-                                      {...props}
-                                    >
+                                    <code className={`language-${match[1]}`} {...props}>
                                       {children}
                                     </code>
                                   </pre>
                                 </div>
                               ) : (
-                                <code
-                                  className="bg-muted px-1.5 py-0.5 rounded text-sm"
-                                  {...props}
-                                >
+                                <code className="bg-muted px-1.5 py-0.5 rounded text-sm" {...props}>
                                   {children}
                                 </code>
-                              );
+                              )
                             },
                             // Fix for math display
-                            div: ({
-                              node,
-                              className,
-                              children,
-                              ...props
-                            }: any) => {
+                            div: ({ node, className, children, ...props }: any) => {
                               // Check if this is a math display node
                               const isMathDisplay = node?.properties?.className
                                 ? Array.isArray(node.properties.className)
-                                  ? node.properties.className.includes(
-                                      "math-display"
-                                    )
-                                  : node.properties.className.includes(
-                                      "math-display"
-                                    )
-                                : false;
+                                  ? node.properties.className.includes("math-display")
+                                  : node.properties.className.includes("math-display")
+                                : false
 
                               if (isMathDisplay) {
-                                return (
-                                  <div className="math-display overflow-x-auto py-2 my-4">
-                                    {children}
-                                  </div>
-                                );
+                                return <div className="math-display overflow-x-auto py-2 my-4">{children}</div>
                               }
                               return (
                                 <div className={className} {...props}>
                                   {children}
                                 </div>
-                              );
+                              )
                             },
                             // Fix for inline math
-                            span: ({
-                              node,
-                              className,
-                              children,
-                              ...props
-                            }: any) => {
+                            span: ({ node, className, children, ...props }: any) => {
                               // Check if this is a math inline node
                               const isMathInline = node?.properties?.className
                                 ? Array.isArray(node.properties.className)
-                                  ? node.properties.className.includes(
-                                      "math-inline"
-                                    )
-                                  : node.properties.className.includes(
-                                      "math-inline"
-                                    )
-                                : false;
+                                  ? node.properties.className.includes("math-inline")
+                                  : node.properties.className.includes("math-inline")
+                                : false
 
                               if (isMathInline) {
-                                return (
-                                  <span className="math-inline mx-1 inline-block">
-                                    {children}
-                                  </span>
-                                );
+                                return <span className="math-inline mx-1 inline-block">{children}</span>
                               }
                               return (
                                 <span className={className} {...props}>
                                   {children}
                                 </span>
-                              );
+                              )
                             },
                           }}
                         >
@@ -951,9 +858,7 @@ export default function ModernChatInterface() {
 
                       {message.sources && message.sources.length > 0 && (
                         <div className="mt-4 pt-3 border-t border-border">
-                          <p className="text-xs font-medium text-muted-foreground mb-1">
-                            Sources:
-                          </p>
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Sources:</p>
                           <ul className="text-xs text-muted-foreground space-y-1 pl-5 list-disc">
                             {message.sources.map((source, index) => (
                               <li key={index}>{source}</li>
@@ -971,7 +876,7 @@ export default function ModernChatInterface() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
-                  className="message-bubble flex max-w-[75%] bg-card/70 mr-auto items-start gap-4 px-4 py-4 rounded-xl shadow-sm glassmorphism"
+                  className="message-bubble flex w-full bg-card/70 items-start gap-4 px-4 py-4 glassmorphism"
                 >
                   <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
                     <Bot className="h-5 w-5 text-primary-foreground" />
@@ -982,7 +887,7 @@ export default function ModernChatInterface() {
                         animate={{ y: [0, -5, 0] }}
                         transition={{
                           duration: 0.5,
-                          repeat: Infinity,
+                          repeat: Number.POSITIVE_INFINITY,
                           repeatDelay: 0.1,
                         }}
                         className="w-2 h-2 rounded-full bg-primary"
@@ -991,7 +896,7 @@ export default function ModernChatInterface() {
                         animate={{ y: [0, -5, 0] }}
                         transition={{
                           duration: 0.5,
-                          repeat: Infinity,
+                          repeat: Number.POSITIVE_INFINITY,
                           repeatDelay: 0.2,
                         }}
                         className="w-2 h-2 rounded-full bg-primary"
@@ -1000,15 +905,13 @@ export default function ModernChatInterface() {
                         animate={{ y: [0, -5, 0] }}
                         transition={{
                           duration: 0.5,
-                          repeat: Infinity,
+                          repeat: Number.POSITIVE_INFINITY,
                           repeatDelay: 0.3,
                         }}
                         className="w-2 h-2 rounded-full bg-primary"
                       />
                     </div>
-                    <span className="text-sm text-muted-foreground">
-                      Thinking...
-                    </span>
+                    <span className="text-sm text-muted-foreground">Thinking...</span>
                   </div>
                 </motion.div>
               )}
@@ -1023,10 +926,7 @@ export default function ModernChatInterface() {
           transition={{ duration: 0.5, delay: 0.2 }}
           className="border-t border-border p-3 md:p-4 bg-background/80 backdrop-blur-sm"
         >
-          <form
-            onSubmit={handleSubmit}
-            className="flex gap-2 items-end max-w-3xl mx-auto"
-          >
+          <form onSubmit={handleSubmit} className="flex gap-2 items-end max-w-3xl mx-auto">
             <div className="relative flex-1">
               <Textarea
                 ref={textareaRef}
@@ -1037,27 +937,19 @@ export default function ModernChatInterface() {
                 rows={1}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmit(e as any);
+                    e.preventDefault()
+                    handleSubmit(e as any)
                   }
                 }}
               />
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="absolute right-2 bottom-2"
-              >
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="absolute right-2 bottom-2">
                 <Button
                   type="submit"
                   size="icon"
                   className="rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-md transition-all duration-200 ease-in-out"
                   disabled={isLoading || !input.trim()}
                 >
-                  {isLoading ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <ArrowRight className="h-5 w-5" />
-                  )}
+                  {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
                 </Button>
               </motion.div>
             </div>
@@ -1065,5 +957,5 @@ export default function ModernChatInterface() {
         </motion.div>
       </div>
     </div>
-  );
+  )
 }

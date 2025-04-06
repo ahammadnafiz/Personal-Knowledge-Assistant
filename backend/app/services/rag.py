@@ -42,7 +42,7 @@ class WebSearchResult(BaseModel):
     title: str = Field(..., description="Title of the search result")
     snippet: str = Field(..., description="Snippet or summary of the search result")
     url: str = Field(..., description="URL of the search result")
-
+    
 class RAGService:
     """
     Self-Corrective RAG (CRAG) Service implementing the complete CRAG pipeline.

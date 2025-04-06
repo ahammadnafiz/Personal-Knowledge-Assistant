@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
     
     # LLM settings
-    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     
     # RAG settings
     CHUNK_SIZE: int = 512
