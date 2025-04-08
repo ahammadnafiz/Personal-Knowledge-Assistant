@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useRef, useEffect } from "react"
 import {
   Bot,
@@ -17,7 +16,10 @@ import {
   MessageSquare,
   Trash2,
   Sparkles,
-  ArrowRight,
+  Send,
+  Copy,
+  Check,
+  FileText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -54,7 +56,7 @@ export default function ModernChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [isTypingAnimation, setIsTypingAnimation] = useState(false)
   const [currentTypingMessage, setCurrentTypingMessage] = useState<string>("")
@@ -66,9 +68,20 @@ export default function ModernChatInterface() {
   const [isBrowser, setIsBrowser] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [copiedText, setCopiedText] = useState<string | null>(null)
 
   useEffect(() => {
     setIsBrowser(true)
+    const checkMobile = () => {
+      if (window.innerWidth < 768) {
+        setIsSidebarOpen(false)
+      } else {
+        setIsSidebarOpen(true)
+      }
+    }
+    checkMobile()
+    window.addEventListener("resize", checkMobile)
+    return () => window.removeEventListener("resize", checkMobile)
   }, [])
 
   // Initialize with a new session on first load
@@ -77,7 +90,7 @@ export default function ModernChatInterface() {
       const newSessionId = Date.now().toString()
       const newSession: ChatSession = {
         id: newSessionId,
-        title: "New Chat",
+        title: "New chat",
         messages: [],
         createdAt: new Date(),
       }
@@ -198,6 +211,76 @@ export default function ModernChatInterface() {
         overflow-y: scroll;
         margin-right: 0;
         padding-right: 0;
+        scrollbar-gutter: stable;
+        position: relative;
+      }
+
+      /* Code block styling */
+      .code-block {
+        position: relative;
+        margin: 1rem 0;
+      }
+
+      .code-block pre {
+        padding-top: 2.5rem !important;
+      }
+
+      .code-header {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 1rem;
+        background: rgba(0, 0, 0, 0.1);
+        border-top-left-radius: 0.5rem;
+        border-top-right-radius: 0.5rem;
+        font-family: monospace;
+        font-size: 0.8rem;
+      }
+
+      .dark .code-header {
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .copy-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.25rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: transparent;
+        border: none;
+        color: inherit;
+      }
+
+      .copy-button:hover {
+        background: rgba(0, 0, 0, 0.1);
+      }
+
+      .dark .copy-button:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      /* Text copy button */
+      .message-content {
+        position: relative;
+      }
+
+      .message-copy-button {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+
+      .message-bubble:hover .message-copy-button {
+        opacity: 1;
       }
     `
     document.head.appendChild(style)
@@ -206,6 +289,16 @@ export default function ModernChatInterface() {
       document.head.removeChild(style)
     }
   }, [])
+
+  // Reset copied text after 2 seconds
+  useEffect(() => {
+    if (copiedText) {
+      const timer = setTimeout(() => {
+        setCopiedText(null)
+      }, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [copiedText])
 
   // Text typing animation effect
   useEffect(() => {
@@ -225,7 +318,7 @@ export default function ModernChatInterface() {
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = "60px"
+      textareaRef.current.style.height = "24px"
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
     }
   }, [input])
@@ -357,7 +450,7 @@ export default function ModernChatInterface() {
 
   const generateChatTitle = async (sessionId: string, userQuery: string, aiResponse: string) => {
     const session = sessions.find((s) => s.id === sessionId)
-    if (session && session.title === "New Chat" && session.messages.length === 0) {
+    if (session && session.title === "New chat" && session.messages.length === 0) {
       const title = userQuery.length > 30 ? userQuery.substring(0, 30) + "..." : userQuery
 
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)))
@@ -374,7 +467,7 @@ export default function ModernChatInterface() {
     const newSessionId = Date.now().toString()
     const newSession: ChatSession = {
       id: newSessionId,
-      title: "New Chat",
+      title: "New chat",
       messages: [],
       createdAt: new Date(),
     }
@@ -385,7 +478,9 @@ export default function ModernChatInterface() {
 
   const switchSession = (sessionId: string) => {
     setActiveSessionId(sessionId)
-    setIsSidebarOpen(false)
+    if (isBrowser && window.innerWidth < 768) {
+      setIsSidebarOpen(false)
+    }
   }
 
   const deleteSession = (sessionId: string, e: React.MouseEvent) => {
@@ -414,9 +509,12 @@ export default function ModernChatInterface() {
     return new Intl.DateTimeFormat("en-US", {
       month: "short",
       day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
     }).format(date)
+  }
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedText(text)
   }
 
   // Updated renderTypingAnimation function with proper type checking
@@ -494,6 +592,7 @@ export default function ModernChatInterface() {
   }
 
   const isDesktop = isBrowser ? window.innerWidth >= 768 : false
+  const isDarkTheme = theme === "dark"
 
   return (
     <div className="flex h-[100dvh] bg-background text-foreground overflow-hidden">
@@ -546,7 +645,7 @@ export default function ModernChatInterface() {
             <div className="flex items-center justify-between w-full">
               <Button
                 variant="outline"
-                className="flex-1 justify-start gap-2 text-foreground hover:bg-primary/10 hover:text-primary transition-all rounded-xl glow-effect"
+                className="flex-1 justify-start gap-2 text-foreground hover:bg-primary/10 hover:text-primary transition-all rounded-xl"
                 onClick={startNewChat}
               >
                 <Sparkles size={16} className="animate-pulse" />
@@ -567,7 +666,7 @@ export default function ModernChatInterface() {
               <Button
                 variant="outline"
                 size="icon"
-                className="text-foreground hover:bg-primary/10 hover:text-primary transition-all rounded-full glow-effect"
+                className="text-foreground hover:bg-primary/10 hover:text-primary transition-all rounded-full"
                 onClick={startNewChat}
               >
                 <Sparkles size={16} className="animate-pulse" />
@@ -719,7 +818,7 @@ export default function ModernChatInterface() {
         </div>
       </motion.div>
 
-      {isSidebarOpen && (
+      {isSidebarOpen && !isDesktop && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -730,13 +829,13 @@ export default function ModernChatInterface() {
         />
       )}
 
-      <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full relative">
+      <div className="flex-1 flex flex-col relative">
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
           <div className="absolute -top-32 -right-32 w-64 h-64 bg-primary/5 rounded-full blur-3xl"></div>
           <div className="absolute top-1/4 -left-32 w-64 h-64 bg-primary/5 rounded-full blur-3xl"></div>
         </div>
 
-        <div ref={chatContainerRef} className="flex-1 overflow-y-auto py-6 px-3 md:px-6 chat-scrollbar relative">
+        <div ref={chatContainerRef} className="flex-1 overflow-y-auto py-6 chat-scrollbar relative">
           {messages.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -747,13 +846,11 @@ export default function ModernChatInterface() {
               <motion.div
                 whileHover={{ scale: 1.05, rotate: 5 }}
                 transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-8"
+                className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center mb-8"
               >
-                <Book className="h-10 w-10 text-primary" />
+                <FileText className="h-10 w-10 text-blue-500" />
               </motion.div>
-              <h1 className="text-3xl font-bold mb-3 bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent">
-                Personal Knowledge Assistant
-              </h1>
+              <h1 className="text-3xl font-bold mb-3 text-blue-500">Personal Knowledge Assistant</h1>
               <div className="max-w-md text-center text-muted-foreground">
                 <p className="text-lg">Ask me anything from your knowledge base.</p>
                 <p className="mt-2">
@@ -762,7 +859,7 @@ export default function ModernChatInterface() {
               </div>
             </motion.div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-6 max-w-3xl mx-auto w-full">
               <AnimatePresence>
                 {messages.map((message) => (
                   <motion.div
@@ -771,7 +868,7 @@ export default function ModernChatInterface() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
                     className={cn(
-                      "message-bubble flex w-full items-start gap-4 px-4 py-4",
+                      "message-bubble flex w-full items-start gap-4 px-6 py-4",
                       message.role === "user" ? "bg-primary/5" : "bg-card/95",
                       message.isTyping && "glassmorphism",
                     )}
@@ -787,7 +884,15 @@ export default function ModernChatInterface() {
                         </div>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 message-content">
+                      <button
+                        onClick={() => copyToClipboard(message.content)}
+                        className="message-copy-button p-1.5 rounded-full bg-background/80 text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
+                        title="Copy message"
+                      >
+                        {copiedText === message.content ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      </button>
+
                       {message.isTyping ? (
                         <div className="prose prose-sm dark:prose-invert max-w-none">
                           {renderTypingAnimation(message.content)}
@@ -799,9 +904,24 @@ export default function ModernChatInterface() {
                           components={{
                             code({ node, inline, className, children, ...props }: any) {
                               const match = /language-(\w+)/.exec(className || "")
+                              const codeContent = String(children).replace(/\n$/, "")
+
                               return !inline && match ? (
-                                <div className="relative my-4">
-                                  <div className="absolute right-2 top-2 text-xs text-muted-foreground">{match[1]}</div>
+                                <div className="code-block">
+                                  <div className="code-header">
+                                    <span>{match[1]}</span>
+                                    <button
+                                      onClick={() => copyToClipboard(codeContent)}
+                                      className="copy-button"
+                                      title="Copy code"
+                                    >
+                                      {copiedText === codeContent ? (
+                                        <Check className="h-4 w-4" />
+                                      ) : (
+                                        <Copy className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                  </div>
                                   <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto">
                                     <code className={`language-${match[1]}`} {...props}>
                                       {children}
@@ -876,7 +996,7 @@ export default function ModernChatInterface() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
-                  className="message-bubble flex w-full bg-card/70 items-start gap-4 px-4 py-4 glassmorphism"
+                  className="message-bubble flex w-full bg-card/70 items-start gap-4 px-6 py-4 glassmorphism"
                 >
                   <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
                     <Bot className="h-5 w-5 text-primary-foreground" />
@@ -924,36 +1044,73 @@ export default function ModernChatInterface() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="border-t border-border p-3 md:p-4 bg-background/80 backdrop-blur-sm"
+          className="p-3 md:p-4"
         >
-          <form onSubmit={handleSubmit} className="flex gap-2 items-end max-w-3xl mx-auto">
-            <div className="relative flex-1">
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleInputChange}
-                placeholder="Ask your knowledge base..."
-                className="resize-none pr-12 py-3 min-h-[60px] max-h-[200px] rounded-2xl border border-input bg-background/50 backdrop-blur-sm focus:border-primary focus:ring-1 focus:ring-primary focus:ring-offset-0 transition-all"
-                rows={1}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    handleSubmit(e as any)
-                  }
-                }}
-              />
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="absolute right-2 bottom-2">
-                <Button
-                  type="submit"
-                  size="icon"
-                  className="rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-md transition-all duration-200 ease-in-out"
-                  disabled={isLoading || !input.trim()}
-                >
-                  {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-                </Button>
-              </motion.div>
+          <div className="max-w-3xl mx-auto">
+            <div
+              className={cn(
+                "relative rounded-2xl shadow-lg",
+                isDarkTheme ? "bg-gray-900" : "bg-white border border-gray-200",
+              )}
+            >
+              <form onSubmit={handleSubmit} className="relative">
+                <div className="absolute left-3 bottom-3 flex items-center">
+                  <button
+                    type="button"
+                    onClick={handleUploadClick}
+                    className={cn(
+                      "p-1.5 rounded-full transition-colors",
+                      isDarkTheme
+                        ? "text-gray-400 hover:bg-gray-800 hover:text-gray-300"
+                        : "text-gray-500 hover:bg-gray-100 hover:text-gray-700",
+                    )}
+                    disabled={isUploading}
+                  >
+                    {isUploading ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : <Upload size={18} />}
+                  </button>
+                </div>
+
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  placeholder="Ask anything"
+                  className={cn(
+                    "resize-none py-4 pl-12 pr-12 min-h-[56px] max-h-[200px] rounded-2xl border-0 focus:ring-0",
+                    isDarkTheme
+                      ? "bg-transparent text-white placeholder:text-gray-400"
+                      : "bg-transparent text-gray-900 placeholder:text-gray-500",
+                  )}
+                  rows={1}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSubmit(e as any)
+                    }
+                  }}
+                />
+
+                <div className="absolute right-3 bottom-3 flex items-center">
+                  <button
+                    type="submit"
+                    className={cn(
+                      "p-1.5 rounded-full transition-colors",
+                      isDarkTheme
+                        ? "text-gray-400 hover:bg-gray-800 hover:text-gray-300"
+                        : "text-gray-500 hover:bg-gray-100 hover:text-gray-700",
+                      !input.trim() && (isDarkTheme ? "text-gray-600" : "text-gray-300"),
+                    )}
+                    disabled={isLoading || !input.trim()}
+                  >
+                    <Send size={18} className={input.trim() ? (isDarkTheme ? "text-white" : "text-blue-500") : ""} />
+                  </button>
+                </div>
+              </form>
             </div>
-          </form>
+            <div className="text-center mt-2 text-xs text-muted-foreground">
+              <span>Personal Knowledge Assistant can make mistakes. Check important info.</span>
+            </div>
+          </div>
         </motion.div>
       </div>
     </div>
