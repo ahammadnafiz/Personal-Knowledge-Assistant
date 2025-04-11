@@ -14,6 +14,11 @@ async def chat(request: ChatRequest):
     """
     try:
         rag_service = RAGService()
+        
+        # Set web search enabled flag from request
+        if hasattr(request, 'web_search_enabled') and request.web_search_enabled is not None:
+            rag_service.enable_web_search = request.web_search_enabled
+        
         response, sources, debug_info = rag_service.process_query(
             query=request.query,
             chat_history=request.chat_history

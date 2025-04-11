@@ -29,6 +29,7 @@ export function useChatState(apiUrl: string) {
   const [currentTypingMessage, setCurrentTypingMessage] = useState<string>("")
   const [typingIndex, setTypingIndex] = useState(0)
   const [copiedText, setCopiedText] = useState<string | null>(null)
+  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false)
 
   // Initialize with a new session on first load
   useEffect(() => {
@@ -279,6 +280,8 @@ export function useChatState(apiUrl: string) {
     setIsLoading(true)
 
     try {
+      console.log("Sending request with web search enabled:", isWebSearchEnabled)
+
       const response = await fetch(`${apiUrl}/chat`, {
         method: "POST",
         headers: {
@@ -287,10 +290,16 @@ export function useChatState(apiUrl: string) {
         body: JSON.stringify({
           query: input.trim(),
           chat_history: getChatHistory(),
+          web_search_enabled: isWebSearchEnabled,
         }),
       })
 
-      if (!response.ok) throw new Error(`API error: ${response.status}`)
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("API error:", response.status, errorText)
+        throw new Error(`API error: ${response.status} - ${errorText}`)
+      }
+
       const data = await response.json()
 
       const assistantMessage: Message = {
@@ -383,6 +392,10 @@ export function useChatState(apiUrl: string) {
     }
   }
 
+  const toggleWebSearch = () => {
+    setIsWebSearchEnabled((prev) => !prev)
+  }
+
   return {
     sessions,
     setSessions,
@@ -398,6 +411,8 @@ export function useChatState(apiUrl: string) {
     typingIndex,
     copiedText,
     setCopiedText,
+    isWebSearchEnabled,
+    toggleWebSearch,
     handleSubmit,
     saveMessagesToSession,
     startNewChat,

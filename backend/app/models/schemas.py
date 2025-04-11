@@ -1,14 +1,12 @@
 # app/models/schemas.py
-from typing import List, Optional
-
-from pydantic import BaseModel
-
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
 
 class ChatRequest(BaseModel):
     query: str
-    chat_history: Optional[List[dict]] = []
-
+    chat_history: Optional[List[Dict[str, Any]]] = None
+    web_search_enabled: Optional[bool] = Field(default=None)
 
 class ChatResponse(BaseModel):
     response: str
-    sources: Optional[List[str]] = None
+    sources: List[str] = []

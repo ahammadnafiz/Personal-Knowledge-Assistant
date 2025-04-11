@@ -16,9 +16,20 @@ from langchain.schema.document import Document
 from langchain.retrievers.document_compressors import EmbeddingsFilter, LLMChainExtractor
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import DocumentCompressorPipeline
-from langchain_community.tools import DuckDuckGoSearchRun
 
 from app.core.config import settings
+
+from dotenv import load_dotenv
+from textwrap import dedent
+from agno.agent import Agent
+from agno.models.google import Gemini
+from agno.tools.duckduckgo import DuckDuckGoTools
+from agno.tools.newspaper4k import Newspaper4kTools
+from textwrap import dedent
+
+load_dotenv()
+
+api_key = os.getenv("GOOGLE_API_KEY")
 
 # Pydantic models for structured outputs
 class RetrievalEvaluatorOutput(BaseModel):
@@ -42,7 +53,7 @@ class WebSearchResult(BaseModel):
     title: str = Field(..., description="Title of the search result")
     snippet: str = Field(..., description="Snippet or summary of the search result")
     url: str = Field(..., description="URL of the search result")
-    
+
 class RAGService:
     """
     Self-Corrective RAG (CRAG) Service implementing the complete CRAG pipeline.
@@ -60,10 +71,7 @@ class RAGService:
         
         # CRAG parameters
         self.top_k_results = settings.TOP_K_RESULTS
-        self.enable_web_search = True  # Set to False if web search is not available
-
-        # Initialize search tool
-        self.search_tool = DuckDuckGoSearchRun()
+        self.enable_web_search = False  # Set to False if web search is not available
         
         # Track latest CRAG action for logging/debugging
         self.latest_crag_action = None
@@ -98,9 +106,9 @@ class RAGService:
     def _initialize_llm(self):
         """Initialize the language model."""
         return ChatGroq(
-            groq_api_key=settings.GROQ_API_KEY,
+            groq_api_key=settings.GROQ_API_KEY_MODEL,
             model_name=settings.LLM_MODEL,
-            temperature=0.0
+            temperature=0.6
         )
     
     def _initialize_memory(self):
@@ -110,6 +118,10 @@ class RAGService:
             return_messages=True,
             output_key="answer"
         )
+        
+    def set_web_search_enabled(self, enabled: bool):
+        """Set whether web search is enabled."""
+        self.enable_web_search = enabled
     
     def evaluate_retrieval(self, query: str, document: str) -> RetrievalEvaluatorOutput:
         """
@@ -257,7 +269,7 @@ class RAGService:
         
         return "\n".join([f"- {strip}" for strip in high_quality_strips])
 
-    def perform_web_search(self, search_query: str, num_results: int = 5) -> List[WebSearchResult]:
+    def perform_web_search(self, search_query: str, num_results: int = 5) -> str:
         """
         Step 4 of CRAG (part 2): Perform web search for external knowledge using DuckDuckGo.
         
@@ -273,62 +285,62 @@ class RAGService:
             return []
             
         try:
-            # Initialize the DuckDuckGo search tool
-            search_tool = DuckDuckGoSearchRun()
-            
-            # Execute the search
-            search_results_text = search_tool.invoke(search_query)
-            
-            # Parse and format the results
-            # DuckDuckGo returns results as a single text string, so we need to parse it
-            # This is a simple parsing approach - you might need to adjust based on actual output format
-            results = []
-            
-            # Split by double newlines to separate different results
-            raw_results = search_results_text.split('\n\n')
-            
-            for i, result in enumerate(raw_results[:num_results]):
-                # Create a basic result object
-                # In a real implementation, you might want to extract title and URL more precisely
-                results.append(
-                    WebSearchResult(
-                        title=f"Result {i+1} from DuckDuckGo",
-                        snippet=result.strip(),
-                        url=f"https://duckduckgo.com/?q={'+'.join(search_query.split())}"
-                    )
-                )
-                
-            return results
+            research_agent = Agent(
+             model=Gemini(
+                id="gemini-2.0-flash",
+                api_key=api_key,
+            ),
+            tools=[
+                DuckDuckGoTools(),
+                Newspaper4kTools(),
+            ],
+            description=dedent("""\
+                    You are an elite research specialist with expertise in comprehensive information gathering and analysis. Your skills include:
+                    🔍 Core Competencies:
+                    - Thorough information collection and verification
+                    - Critical evaluation of sources
+                    - Extracting key insights from multiple resources
+                    - Identifying reliable and authoritative content
+                    - Synthesizing complex information
+                    - Recognizing patterns and connections
+                    - Providing balanced and objective overviews
+                    - Contextualizing information relevance
+                """),
+                instructions=dedent("""\
+                    1. Research Process:
+                    - Search for multiple authoritative sources on the topic
+                    - Prioritize recent and relevant information
+                    - Collect information from diverse perspectives
+                    
+                    2. Analysis & Synthesis:
+                    - Verify information across multiple sources
+                    - Extract key facts and concepts
+                    - Identify consensus views and disagreements
+                    - Organize information logically
+                    
+                    3. Response Format:
+                    - Provide a concise overview of findings
+                    - Present information in clear, structured sections
+                    - Include important facts, statistics and quotes
+                    - Maintain objectivity throughout
+                    
+                    4. Quality Standards:
+                    - Ensure accuracy of all information
+                    - Focus on relevance to the query
+                    - Present a balanced perspective
+                    - Identify any significant information gaps
+                """),
+            markdown=True,
+            show_tool_calls=False,  # Hide tool calls in the response
+            add_datetime_to_instructions=True,
+            )
+
+            response = research_agent.run(search_query)
+            return response
                     
         except Exception as e:
             print(f"Web search error: {e}")
-            return []
-    
-    def process_web_search_results(self, search_results: List[WebSearchResult], query: str) -> str:
-        """
-        Step 4 of CRAG (part 3): Process web search results into usable knowledge.
-        
-        Args:
-            search_results: List of search results
-            query: Original query
-            
-        Returns:
-            Processed knowledge from web search
-        """
-        if not search_results:
-            return "No external information found."
-        
-        # Create a document from search results
-        combined_content = "\n\n".join([
-            f"Title: {result.title}\nSnippet: {result.snippet}\nURL: {result.url}"
-            for result in search_results
-        ])
-        
-        # Decompose and filter the web content
-        strips_output = self.decompose_knowledge(combined_content, query)
-        filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.6)
-        
-        return filtered_content
+            return ''
     
     def ingest_documents(self, directory_path: str, specific_files: Optional[List[str]] = None) -> int:
         """
@@ -460,6 +472,7 @@ class RAGService:
         Returns:
             Tuple of (response, sources, debug_info)
         """
+        
         if not self.vector_store:
             return "Please ingest documents first.", [], {"error": "No documents ingested"}
         
@@ -484,94 +497,176 @@ class RAGService:
         print(f"Original query: {query}")
         print(f"Rewritten query: {rewritten_query}")
         
-        # Step 2: Initial retrieval with contextual compression
-        retriever = self.create_contextual_compression_retriever()
-        retrieved_docs = retriever.invoke(rewritten_query)
+        if self.enable_web_search:
+            # Step 2: Local document retrieval with contextual compression
+            sources = []
+            local_knowledge = ""
+            best_score = 0.5  # Default medium confidence
+            
+            # Only attempt vector retrieval if we have a vector store
+            if self.vector_store:
+                retriever = self.create_contextual_compression_retriever()
+                retrieved_docs = retriever.invoke(rewritten_query)
+                
+                # Evaluate retrieved documents if any were found
+                doc_evaluations = []
+                if retrieved_docs:
+                    for doc in retrieved_docs:
+                        eval_result = self.evaluate_retrieval(query, doc.page_content)
+                        doc_evaluations.append({
+                            "document": doc,
+                            "relevance": eval_result.relevance_score,
+                            "reliability": eval_result.reliability_score,
+                            "combined_score": (eval_result.relevance_score + eval_result.reliability_score) / 2,
+                            "reasoning": eval_result.reasoning
+                        })
+                    
+                    # Sort documents by combined score (descending)
+                    doc_evaluations.sort(key=lambda x: x["combined_score"], reverse=True)
+                    
+                    # Record evaluation scores for debugging
+                    debug_info["evaluation_scores"] = [{
+                        "relevance": eval["relevance"], 
+                        "reliability": eval["reliability"],
+                        "combined_score": eval["combined_score"],
+                        "reasoning": eval["reasoning"]
+                    } for eval in doc_evaluations]
+                    
+                    # Use the best score for confidence level
+                    if doc_evaluations:
+                        best_score = doc_evaluations[0]["combined_score"]
+                    
+                    # Process document knowledge
+                    doc_knowledge = []
+                    for eval in doc_evaluations:
+                        doc = eval["document"]
+                        strips_output = self.decompose_knowledge(doc.page_content, query)
+                        filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.5)
+                        doc_knowledge.append(filtered_content)
+                        
+                        # Track source
+                        if hasattr(doc, "metadata") and "source" in doc.metadata:
+                            source = doc.metadata["source"]
+                            if source not in sources:
+                                sources.append(source)
+                    
+                    local_knowledge = "\n\n".join(doc_knowledge)
+            
+            # Step 3: Always perform web search
+            web_knowledge = ""
+            print("Performing web search...")
+            web_knowledge  = self.perform_web_search(rewritten_query)
+            
+            # Add web search as a source
+            if "Web search" not in sources:
+                sources.append("Web search")
         
-        # If no documents were retrieved, handle empty case
-        if not retrieved_docs:
-            print("No documents retrieved from vector store.")
-            if self.enable_web_search:
-                print("Falling back to web search...")
+            # Step 4: Combine knowledge from both sources
+            if local_knowledge and web_knowledge:
+                final_knowledge = "Information from documents:\n\n" + local_knowledge + "\n\nUp-to-date information from web search:\n\n" + str(web_knowledge)
+            elif local_knowledge:
+                final_knowledge = local_knowledge
+            elif web_knowledge:
+                final_knowledge = str(web_knowledge)
+            else:
+                final_knowledge = "No relevant information found from either documents or web search."
+            
+            # Record knowledge sources
+            debug_info["knowledge_sources"] = sources
+            
+            # Step 5: Generate final response
+            response = self._generate_response(query, final_knowledge, best_score, sources)
+            
+            # Save to memory
+            self.memory.save_context({"input": query}, {"answer": response})
+            
+            return response, sources, debug_info
+        
+        # If web search is not enabled, only use local documents
+        else:
+            
+            # Step 2: Initial retrieval with contextual compression
+            retriever = self.create_contextual_compression_retriever()
+            retrieved_docs = retriever.invoke(rewritten_query)
+            
+            # If no documents were retrieved, handle empty case
+            if not retrieved_docs:
+                print("No documents retrieved from vector store.")
+
                 self.latest_crag_action = "web_search_fallback"
                 debug_info["crag_action"] = "web_search_fallback"
                 
                 # Perform web search
-                search_results = self.perform_web_search(rewritten_query)
-                external_knowledge = self.process_web_search_results(search_results, query)
+                external_knowledge = self.perform_web_search(rewritten_query)
                 
                 # Create a response with web search results
                 response = self._generate_response(query, external_knowledge, 0.5, ["Web search"])
                 return response, ["Web search"], debug_info
-            else:
-                return "I couldn't find any relevant information in the available documents.", [], debug_info
-        
-        # Step 3: Evaluate retrieved documents
-        doc_evaluations = []
-        for doc in retrieved_docs:
-            eval_result = self.evaluate_retrieval(query, doc.page_content)
-            doc_evaluations.append({
-                "document": doc,
-                "relevance": eval_result.relevance_score,
-                "reliability": eval_result.reliability_score,
-                "combined_score": (eval_result.relevance_score + eval_result.reliability_score) / 2,
-                "reasoning": eval_result.reasoning
-            })
-        
-        # Sort documents by combined score (descending)
-        doc_evaluations.sort(key=lambda x: x["combined_score"], reverse=True)
-        
-        # Record evaluation scores for debugging
-        debug_info["evaluation_scores"] = [{
-            "relevance": eval["relevance"], 
-            "reliability": eval["reliability"],
-            "combined_score": eval["combined_score"],
-            "reasoning": eval["reasoning"]
-        } for eval in doc_evaluations]
-        
-        # Get the best document and its score
-        best_eval = doc_evaluations[0] if doc_evaluations else None
-        best_score = best_eval["combined_score"] if best_eval else 0
-        
-        # Step 4: Determine CRAG action based on evaluation scores
-        sources = []
-        final_knowledge = ""
-        
-        if best_score >= self.high_confidence_threshold:
-            # CORRECT action: Use knowledge refinement
-            self.latest_crag_action = "correct"
-            debug_info["crag_action"] = "correct"
-            print(f"CRAG Action: CORRECT (Score: {best_score})")
             
-            # Use the top documents
-            top_docs = [eval["document"] for eval in doc_evaluations[:3]]
+            # Step 3: Evaluate retrieved documents
+            doc_evaluations = []
+            for doc in retrieved_docs:
+                eval_result = self.evaluate_retrieval(query, doc.page_content)
+                doc_evaluations.append({
+                    "document": doc,
+                    "relevance": eval_result.relevance_score,
+                    "reliability": eval_result.reliability_score,
+                    "combined_score": (eval_result.relevance_score + eval_result.reliability_score) / 2,
+                    "reasoning": eval_result.reasoning
+                })
             
-            # Apply knowledge decomposition and filtering to each document
-            refined_knowledge = []
-            for doc in top_docs:
-                strips_output = self.decompose_knowledge(doc.page_content, query)
-                filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.6)
-                refined_knowledge.append(filtered_content)
+            # Sort documents by combined score (descending)
+            doc_evaluations.sort(key=lambda x: x["combined_score"], reverse=True)
+            
+            # Record evaluation scores for debugging
+            debug_info["evaluation_scores"] = [{
+                "relevance": eval["relevance"], 
+                "reliability": eval["reliability"],
+                "combined_score": eval["combined_score"],
+                "reasoning": eval["reasoning"]
+            } for eval in doc_evaluations]
+            
+            # Get the best document and its score
+            best_eval = doc_evaluations[0] if doc_evaluations else None
+            best_score = best_eval["combined_score"] if best_eval else 0
+            
+            # Step 4: Determine CRAG action based on evaluation scores
+            sources = []
+            final_knowledge = ""
+            
+            if best_score >= self.high_confidence_threshold:
+                # CORRECT action: Use knowledge refinement
+                self.latest_crag_action = "correct"
+                debug_info["crag_action"] = "correct"
+                print(f"CRAG Action: CORRECT (Score: {best_score})")
                 
-                # Track source
-                if hasattr(doc, "metadata") and "source" in doc.metadata:
-                    source = doc.metadata["source"]
-                    if source not in sources:
-                        sources.append(source)
-            
-            # Combine refined knowledge
-            final_knowledge = "\n\n".join(refined_knowledge)
-            
-        elif best_score <= self.low_confidence_threshold:
-            # INCORRECT action: Use web search if enabled
-            self.latest_crag_action = "incorrect"
-            debug_info["crag_action"] = "incorrect"
-            print(f"CRAG Action: INCORRECT (Score: {best_score})")
-            
-            if self.enable_web_search:
+                # Use the top documents
+                top_docs = [eval["document"] for eval in doc_evaluations[:3]]
+                
+                # Apply knowledge decomposition and filtering to each document
+                refined_knowledge = []
+                for doc in top_docs:
+                    strips_output = self.decompose_knowledge(doc.page_content, query)
+                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.6)
+                    refined_knowledge.append(filtered_content)
+                    
+                    # Track source
+                    if hasattr(doc, "metadata") and "source" in doc.metadata:
+                        source = doc.metadata["source"]
+                        if source not in sources:
+                            sources.append(source)
+                
+                # Combine refined knowledge
+                final_knowledge = "\n\n".join(refined_knowledge)
+                
+            elif best_score <= self.low_confidence_threshold:
+                # INCORRECT action: Use web search if enabled
+                self.latest_crag_action = "incorrect"
+                debug_info["crag_action"] = "incorrect"
+                print(f"CRAG Action: INCORRECT (Score: {best_score})")
+                
                 # Perform web search
                 search_results = self.perform_web_search(rewritten_query)
-                web_knowledge = self.process_web_search_results(search_results, query)
                 
                 # Still include whatever limited information we got from documents
                 doc_knowledge = []
@@ -591,14 +686,20 @@ class RAGService:
                 sources.append("Web search")
                 
                 # Combine knowledge
-                final_knowledge = "Information from documents:\n\n" + "\n\n".join(doc_knowledge) + "\n\nInformation from web search:\n\n" + web_knowledge
+                final_knowledge = "Information from documents:\n\n" + "\n\n".join(doc_knowledge) + "\n\nInformation from web search:\n\n" + str(search_results)
+            
             else:
-                # Use whatever limited information we have from documents
+                # AMBIGUOUS action: Use hybrid approach
+                self.latest_crag_action = "ambiguous"
+                debug_info["crag_action"] = "ambiguous"
+                print(f"CRAG Action: AMBIGUOUS (Score: {best_score})")
+                
+                # Process document knowledge
                 doc_knowledge = []
                 for eval in doc_evaluations:
                     doc = eval["document"]
                     strips_output = self.decompose_knowledge(doc.page_content, query)
-                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.4)  # Lower threshold
+                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.5)
                     doc_knowledge.append(filtered_content)
                     
                     # Track source
@@ -607,50 +708,27 @@ class RAGService:
                         if source not in sources:
                             sources.append(source)
                 
-                final_knowledge = "\n\n".join(doc_knowledge)
-        
-        else:
-            # AMBIGUOUS action: Use hybrid approach
-            self.latest_crag_action = "ambiguous"
-            debug_info["crag_action"] = "ambiguous"
-            print(f"CRAG Action: AMBIGUOUS (Score: {best_score})")
+                # Optionally supplement with web search in ambiguous cases
+                if best_score < 0.6:  # Only use web search if confidence is on the lower end
+                    search_results = self.perform_web_search(rewritten_query)
+                    
+                    # Add web search as a source
+                    sources.append("Web search")
+                    
+                    final_knowledge = "Information from documents:\n\n" + "\n\n".join(doc_knowledge) + "\n\nAdditional information:\n\n" + str(search_results)
+                else:
+                    final_knowledge = "\n\n".join(doc_knowledge)
             
-            # Process document knowledge
-            doc_knowledge = []
-            for eval in doc_evaluations:
-                doc = eval["document"]
-                strips_output = self.decompose_knowledge(doc.page_content, query)
-                filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.5)
-                doc_knowledge.append(filtered_content)
-                
-                # Track source
-                if hasattr(doc, "metadata") and "source" in doc.metadata:
-                    source = doc.metadata["source"]
-                    if source not in sources:
-                        sources.append(source)
+            # Record knowledge sources
+            debug_info["knowledge_sources"] = sources
             
-            # Optionally supplement with web search in ambiguous cases
-            if self.enable_web_search and best_score < 0.6:  # Only use web search if confidence is on the lower end
-                search_results = self.perform_web_search(rewritten_query)
-                web_knowledge = self.process_web_search_results(search_results, query)
-                
-                # Add web search as a source
-                sources.append("Web search")
-                
-                final_knowledge = "Information from documents:\n\n" + "\n\n".join(doc_knowledge) + "\n\nAdditional information:\n\n" + web_knowledge
-            else:
-                final_knowledge = "\n\n".join(doc_knowledge)
-        
-        # Record knowledge sources
-        debug_info["knowledge_sources"] = sources
-        
-        # Step 6: Generate final response
-        response = self._generate_response(query, final_knowledge, best_score, sources)
-        
-        # Save to memory
-        self.memory.save_context({"input": query}, {"answer": response})
-        
-        return response, sources, debug_info
+            # Step 6: Generate final response
+            response = self._generate_response(query, final_knowledge, best_score, sources)
+            
+            # Save to memory
+            self.memory.save_context({"input": query}, {"answer": response})
+            
+            return response, sources, debug_info
     
     def _generate_response(self, query: str, knowledge: str, confidence_score: float, sources: List[str]) -> str:
         """
@@ -675,41 +753,60 @@ class RAGService:
         
         # Create the prompt template
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a knowledgeable assistant that provides accurate information based on available documents.
-            
-            GUIDELINES:
-            - Only use information from the provided context to answer questions
-            - When information is insufficient or missing, explicitly acknowledge gaps
-            - Maintain a conversational and helpful tone
-            - Cite specific sources when providing information
-            - Never fabricate information or sources
-            - If the confidence level is below 70%, explicitly acknowledge uncertainty
-            - For complex questions, break down your reasoning step-by-step
-            - If asked about topics completely outside the provided context, politely explain that you can only answer based on the available documents
-            """),
-            
-            MessagesPlaceholder(variable_name="chat_history"),
-            
-            ("human", "{input}"),
-            
-            ("system", """
-            CONTEXT INFORMATION:
-            -------------------
+            ("system", """**Role**: You are My Personal Knowledge Architect, designed to analyze and synthesize information from my private document collection.
+
+            **Core Capabilities**:
+            1. Cross-Document Synthesis: Connect concepts across different files/books/papers
+            2. Adaptive Explanation: Adjust depth based on content type:
+            - Technical Papers: Math/formulas/citations
+            - Books: Chapter summaries & thematic analysis
+            - Scripts: Code structure & implementation logic
+            - Notes: Contextual reconstruction
+            3. Source Tracing: Always reference filename + page/line numbers
+            4. Knowledge Gaps: Flag missing information between documents
+
+            **Operational Rules**:
+            1. Absolute Truthfulness: Never invent beyond provided documents
+            2. Concept Mapping: Show relationships between ideas from different sources
+            3. Layered Explanations:
+            - deep dive with examples
+            4. Special Handling For:
+            ```[Code Blocks] → Preserve original formatting + explain logic
+            [Diagrams/Images] → Describe visual elements verbatim
+            [Handwritten Notes] → Decipher ambiguous text cautiously```
+
+            **Confidence Framework**:
+            - High (70-100%): Exact matches in multiple documents
+            - Medium (30-69%): Partial matches requiring inference
+            - Low (<30%): Tentative connections
+
+            **Response Template**:
+            "[Brief Answer]
+            **Full Analysis**:  
+            [Detailed explanation with quotes/excerpts]
+            **Sources**: [File Names + Locations]  
+            **Connections**: [Cross-document links]  
+            **Gaps**: [Missing knowledge alerts]  
+            "  
+
+            **Critical Directives**:
+            - If uncertain: "My documents suggest... [but are incomplete]"
+            - For conflicting info: "Document A says X, while Document B states Y"
+            - Preserve original document phrasing when crucial
+            - Never assume access to external knowledge"""),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{input}"),
+                ("system", """**Active Documents**:
             {context}
-            
-            CONFIDENCE ASSESSMENT:
-            --------------------
-            Confidence Score: {confidence_level}
-            Sources: {sources}
-            
-            RESPONSE INSTRUCTIONS:
-            --------------------
-            1. First assess if the query can be answered using the provided context
-            2. If confidence is HIGH (>85%): Provide a direct, comprehensive answer with source citations
-            3. If confidence is MEDIUM (70-85%): Provide a qualified response that acknowledges potential limitations
-            4. If confidence is LOW (<70%): Clearly state the limitations and what specific information would be needed
-            5. For all responses, maintain transparency about the source and reliability of information
-            """),
+
+    METADATA:
+    - Confidence Level: {confidence_level}
+    - Sources: {sources}
+
+    Respond directly to the user's query using ONLY the information provided above. 
+    If the information is incomplete or uncertain, acknowledge this fact.
+    Always cite your sources at the end of your response in a "References" section.
+    """),
         ])
         
         # Create document chain

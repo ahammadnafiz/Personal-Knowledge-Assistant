@@ -25,6 +25,8 @@ export default function ModernChatInterface() {
     setInput,
     copiedText,
     setCopiedText,
+    isWebSearchEnabled,
+    toggleWebSearch,
     handleSubmit,
     startNewChat,
     switchSession,
@@ -205,6 +207,8 @@ export default function ModernChatInterface() {
             handleUploadClick={handleUploadClick}
             isUploading={isUploading}
             isDarkTheme={isDarkTheme}
+            isWebSearchEnabled={isWebSearchEnabled}
+            toggleWebSearch={toggleWebSearch}
           />
         </motion.div>
       </div>
