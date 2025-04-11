@@ -7,17 +7,20 @@ Welcome to the **Personal Knowledge Assistant** project! This guide will walk yo
 ![System Architecture Diagram](assets/diagram.png)
 
 ### 1. Document Processing
+
 - **Document Loading**: Processes PDF documents using PyPDFLoader
 - **Text Chunking**: Splits documents into manageable chunks using RecursiveCharacterTextSplitter
 - **Embedding Generation**: Converts chunks into vector representations using HuggingFaceEmbeddings
 - **Vector Storage**: Stores embeddings in a FAISS vector store for efficient retrieval
 
 ### 2. Query Processing
+
 - **Query Rewriting**: Rewrites the original query to be more effective for retrieval
 - **Base Retrieval**: Retrieves initial set of relevant documents from the vector store
 - **Contextual Compression**: Applies filtering and extraction to improve retrieval quality
 
 ### 3. Confidence-Based Evaluation
+
 - **Document Evaluation**: Evaluates each retrieved document for relevance and reliability
 - **Score Calculation**: Combines relevance and reliability into a confidence score
 - **Confidence Routing**: Routes the query to different processing paths based on confidence:
@@ -26,16 +29,19 @@ Welcome to the **Personal Knowledge Assistant** project! This guide will walk yo
   - Low Confidence (<0.3): Falls back to web search
 
 ### 4. Knowledge Refinement
+
 - **Knowledge Strip Decomposition**: Breaks documents into individual "knowledge strips"
 - **Strip Relevance Scoring**: Scores each strip's relevance to the query
 - **Strip Filtering**: Filters strips based on relevance threshold
 
 ### 5. Web Search Integration (for low confidence)
+
 - **Search Query Generation**: Creates optimized search queries
 - **DuckDuckGo Search**: Performs web search using DuckDuckGo
 - **Result Processing**: Extracts and processes relevant information from search results
 
 ### 6. Response Generation
+
 - **Prompt Template**: Assembles a prompt with context, confidence level, and query
 - **Conversation Memory**: Maintains chat history for contextual responses
 - **LLM Generation**: Generates final response using Groq LLM (Mistral model)
@@ -48,7 +54,6 @@ Welcome to the **Personal Knowledge Assistant** project! This guide will walk yo
 3. **Dynamic Web Search Fallback**: Uses web search when document knowledge is insufficient
 4. **Document Evaluation**: Explicitly evaluates document relevance and reliability
 5. **Contextual Compression**: Uses embeddings filtering and LLM extraction to improve retrieval quality
-
 
 ## Prerequisites
 

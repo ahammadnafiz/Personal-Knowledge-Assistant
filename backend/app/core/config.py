@@ -8,8 +8,7 @@ load_dotenv()
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Personal Knowledge Assistant"
     API_PREFIX: str = "/api"
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    
+    GROQ_API_KEY_MODEL: str = os.getenv("GROQ_API_KEY_MODEL", "")  
     # Vector store settings
     VECTOR_STORE_PATH: str = "data/vector_store"
     
