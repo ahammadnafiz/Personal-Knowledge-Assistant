@@ -280,9 +280,6 @@ class RAGService:
         Returns:
             List of WebSearchResult objects
         """
-        if not self.enable_web_search:
-            print("Web search is disabled.")
-            return []
             
         try:
             research_agent = Agent(

@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { FileText } from "lucide-react"
+import { Brain } from "lucide-react"
 
 export function EmptyState() {
   return (
@@ -14,9 +14,9 @@ export function EmptyState() {
       <motion.div
         whileHover={{ scale: 1.05, rotate: 5 }}
         transition={{ type: "spring", stiffness: 400, damping: 10 }}
-        className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center mb-8"
+        className="mb-8"
       >
-        <FileText className="h-10 w-10 text-blue-500" />
+        <Brain className="h-16 w-16 text-blue-500" />
       </motion.div>
       <h1 className="text-3xl font-bold mb-3 text-blue-500">Personal Knowledge Assistant</h1>
       <div className="max-w-md text-center text-muted-foreground">
