@@ -76,6 +76,55 @@
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
+/* Chat specific scrollbar */
+.chat-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 2px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Glassmorphism effects */
+.glassmorphism {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.dark .glassmorphism {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Message bubble enhancements */
+.message-bubble {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid hsl(var(--border) / 0.3);
+  border-radius: 1rem;
+  transition: all 0.2s ease;
+}
+
+.message-bubble:hover {
+  border-color: hsl(var(--border) / 0.6);
+  box-shadow: 0 4px 12px hsl(var(--muted-foreground) / 0.1);
+}
+
+.dark .message-bubble:hover {
+  box-shadow: 0 4px 12px hsl(var(--background) / 0.3);
+}
+
 /* Message animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
@@ -84,4 +133,290 @@
 
 .message-animate-in {
   animation: fadeIn 0.3s ease forwards;
+}
+
+/* Enhanced Math Rendering Styles */
+.katex {
+  font-size: 1.2em !important;
+  line-height: 1.5 !important;
+  color: hsl(var(--foreground)) !important;
+  font-family: 'KaTeX_Main', 'Computer Modern', 'Times New Roman', serif !important;
+}
+
+.katex-display {
+  margin: 2em 0 !important;
+  text-align: center !important;
+  padding: 2rem !important;
+  background: linear-gradient(135deg, hsl(var(--muted) / 0.3), hsl(var(--muted) / 0.1)) !important;
+  border-radius: 1rem !important;
+  border: 1px solid hsl(var(--border) / 0.5) !important;
+  border-left: 4px solid hsl(var(--primary)) !important;
+  overflow-x: auto !important;
+  box-shadow: 0 4px 16px hsl(var(--muted-foreground) / 0.08) !important;
+  position: relative !important;
+}
+
+.katex-display::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.3), transparent);
+}
+
+.dark .katex-display {
+  background: linear-gradient(135deg, hsl(var(--muted) / 0.2), hsl(var(--background) / 0.5)) !important;
+  box-shadow: 0 4px 20px hsl(var(--background) / 0.3) !important;
+  border-color: hsl(var(--border) / 0.3) !important;
+}
+
+.katex-display .katex {
+  font-size: 1.4em !important;
+  color: hsl(var(--foreground)) !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+.math-display-container {
+  margin: 2rem 0;
+}
+
+.math-display {
+  border-radius: 1rem;
+  background: linear-gradient(135deg, hsl(var(--muted) / 0.3), hsl(var(--muted) / 0.1));
+  padding: 2rem;
+  margin: 0;
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-left: 4px solid hsl(var(--primary));
+  overflow-x: auto;
+  box-shadow: 0 4px 16px hsl(var(--muted-foreground) / 0.08);
+  position: relative;
+}
+
+.math-display::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.3), transparent);
+}
+
+.dark .math-display {
+  background: linear-gradient(135deg, hsl(var(--muted) / 0.2), hsl(var(--background) / 0.5));
+  box-shadow: 0 4px 20px hsl(var(--background) / 0.3);
+  border-color: hsl(var(--border) / 0.3);
+}
+
+.math-inline-container .math-inline {
+  background: linear-gradient(135deg, hsl(var(--muted) / 0.5), hsl(var(--muted) / 0.3));
+  padding: 0.3em 0.6em;
+  border-radius: 0.4rem;
+  font-size: 1.05em;
+  margin: 0 0.2em;
+  display: inline-block;
+  box-shadow: 0 2px 4px hsl(var(--muted-foreground) / 0.1);
+  border: 1px solid hsl(var(--border) / 0.4);
+  vertical-align: middle;
+}
+
+.dark .math-inline-container .math-inline {
+  background: linear-gradient(135deg, hsl(var(--muted) / 0.4), hsl(var(--muted) / 0.2));
+}
+
+/* Improve KaTeX font rendering and spacing */
+.katex .mathdefault {
+  font-family: "KaTeX_Math", "Computer Modern", "Times New Roman", serif !important;
+  font-style: italic !important;
+}
+
+.katex .mathrm {
+  font-family: "KaTeX_Main", "Computer Modern", "Times New Roman", serif !important;
+}
+
+.katex .mathbf {
+  font-weight: bold !important;
+}
+
+.katex .mathit {
+  font-style: italic !important;
+}
+
+/* Enhanced symbols and operators */
+.katex .mbin, .katex .mrel {
+  margin: 0 0.3em !important;
+}
+
+.katex .mord + .mbin, .katex .mbin + .mord,
+.katex .mord + .mrel, .katex .mrel + .mord {
+  margin-left: 0.3em !important;
+}
+
+/* Better sum, integral, and large operator spacing */
+.katex .mop {
+  margin: 0 0.2em !important;
+}
+
+.katex .mop.op-symbol {
+  color: hsl(var(--primary)) !important;
+  font-weight: 600 !important;
+}
+
+/* Enhance fractions */
+.katex .frac-line {
+  border-bottom-color: hsl(var(--foreground)) !important;
+  border-bottom-width: 1.2px !important;
+}
+
+.katex .nulldelimiter {
+  width: 0.3em !important;
+}
+
+/* Better handling of math overflow */
+.katex-display > .katex {
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding-bottom: 0.5rem;
+}
+
+/* Enhance parentheses and brackets */
+.katex .sizing, .katex .delimsizing {
+  color: hsl(var(--primary) / 0.8) !important;
+}
+
+/* Superscripts and subscripts */
+.katex .vlist-t {
+  color: hsl(var(--foreground)) !important;
+}
+
+.katex .msupsub {
+  color: hsl(var(--foreground) / 0.9) !important;
+}
+
+/* Responsive math display */
+@media (max-width: 640px) {
+  .katex-display {
+    padding: 1rem !important;
+    font-size: 0.9em !important;
+  }
+  
+  .katex-display .katex {
+    font-size: 1.1em !important;
+  }
+  
+  .math-display {
+    padding: 1rem;
+  }
+}
+
+/* Code block enhancements */
+.code-block {
+  position: relative;
+  margin: 1rem 0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+}
+
+.code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: hsl(var(--muted) / 0.5);
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+
+.copy-button {
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  background: transparent;
+  border: none;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-button:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+/* Message content positioning */
+.message-content {
+  position: relative;
+}
+
+.message-copy-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+}
+
+.message-bubble:hover .message-copy-button {
+  opacity: 1;
+}
+
+/* Prose enhancements for better readability */
+.prose {
+  max-width: none !important;
+}
+
+.prose p {
+  margin-bottom: 1rem;
+  line-height: 1.6;
+}
+
+.prose ul, .prose ol {
+  margin: 1rem 0;
+  padding-left: 1.5rem;
+}
+
+.prose li {
+  margin-bottom: 0.5rem;
+}
+
+.prose blockquote {
+  border-left: 4px solid hsl(var(--primary));
+  padding-left: 1rem;
+  margin: 1rem 0;
+  font-style: italic;
+  background: hsl(var(--muted) / 0.3);
+  border-radius: 0.25rem;
+  padding: 1rem;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.prose th, .prose td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.prose th {
+  background: hsl(var(--muted) / 0.5);
+  font-weight: 600;
 }

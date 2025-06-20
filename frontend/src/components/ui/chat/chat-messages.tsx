@@ -57,14 +57,20 @@ export function ChatMessages({ messages, isLoading, copiedText, setCopiedText, m
               )
             },
             div: ({ node, className, children, ...props }: any) => {
-              const isMathDisplay = node?.properties?.className
-                ? Array.isArray(node.properties.className)
-                  ? node.properties.className.includes("math-display")
-                  : node.properties.className.includes("math-display")
-                : false
+              const isMathDisplay = className?.includes("math-display") || 
+                (node?.properties?.className && 
+                 (Array.isArray(node.properties.className) 
+                   ? node.properties.className.includes("math-display")
+                   : node.properties.className.includes("math-display")))
 
               if (isMathDisplay) {
-                return <div className="math-display overflow-x-auto py-2 my-4">{children}</div>
+                return (
+                  <div className="math-display-container my-6">
+                    <div className="math-display overflow-x-auto py-3 px-4 bg-gradient-to-br from-muted/40 to-muted/20 rounded-xl border border-border/40 shadow-sm">
+                      {children}
+                    </div>
+                  </div>
+                )
               }
               return (
                 <div className={className} {...props}>
@@ -73,14 +79,20 @@ export function ChatMessages({ messages, isLoading, copiedText, setCopiedText, m
               )
             },
             span: ({ node, className, children, ...props }: any) => {
-              const isMathInline = node?.properties?.className
-                ? Array.isArray(node.properties.className)
-                  ? node.properties.className.includes("math-inline")
-                  : node.properties.className.includes("math-inline")
-                : false
+              const isMathInline = className?.includes("math-inline") || 
+                (node?.properties?.className && 
+                 (Array.isArray(node.properties.className) 
+                   ? node.properties.className.includes("math-inline")
+                   : node.properties.className.includes("math-inline")))
 
               if (isMathInline) {
-                return <span className="math-inline mx-1 inline-block">{children}</span>
+                return (
+                  <span className="math-inline-container">
+                    <span className="math-inline mx-1 px-2 py-1 bg-muted/60 rounded-md border border-border/30 inline-block shadow-sm">
+                      {children}
+                    </span>
+                  </span>
+                )
               }
               return (
                 <span className={className} {...props}>
@@ -88,6 +100,19 @@ export function ChatMessages({ messages, isLoading, copiedText, setCopiedText, m
                 </span>
               )
             },
+            p: ({ children, ...props }) => (
+              <p className="mb-4 last:mb-0 leading-relaxed" {...props}>
+                {children}
+              </p>
+            ),
+            blockquote: ({ children, ...props }) => (
+              <blockquote 
+                className="border-l-4 border-primary pl-4 py-2 my-4 bg-muted/30 rounded-r italic" 
+                {...props}
+              >
+                {children}
+              </blockquote>
+            ),
           }}
         >
           {content}
@@ -173,14 +198,20 @@ export function ChatMessages({ messages, isLoading, copiedText, setCopiedText, m
                       )
                     },
                     div: ({ node, className, children, ...props }: any) => {
-                      const isMathDisplay = node?.properties?.className
-                        ? Array.isArray(node.properties.className)
-                          ? node.properties.className.includes("math-display")
-                          : node.properties.className.includes("math-display")
-                        : false
+                      const isMathDisplay = className?.includes("math-display") || 
+                        (node?.properties?.className && 
+                         (Array.isArray(node.properties.className) 
+                           ? node.properties.className.includes("math-display")
+                           : node.properties.className.includes("math-display")))
 
                       if (isMathDisplay) {
-                        return <div className="math-display overflow-x-auto py-2 my-4">{children}</div>
+                        return (
+                          <div className="math-display-container my-6">
+                            <div className="math-display overflow-x-auto py-3 px-4 bg-gradient-to-br from-muted/40 to-muted/20 rounded-xl border border-border/40 shadow-sm">
+                              {children}
+                            </div>
+                          </div>
+                        )
                       }
                       return (
                         <div className={className} {...props}>
@@ -189,14 +220,20 @@ export function ChatMessages({ messages, isLoading, copiedText, setCopiedText, m
                       )
                     },
                     span: ({ node, className, children, ...props }: any) => {
-                      const isMathInline = node?.properties?.className
-                        ? Array.isArray(node.properties.className)
-                          ? node.properties.className.includes("math-inline")
-                          : node.properties.className.includes("math-inline")
-                        : false
+                      const isMathInline = className?.includes("math-inline") || 
+                        (node?.properties?.className && 
+                         (Array.isArray(node.properties.className) 
+                           ? node.properties.className.includes("math-inline")
+                           : node.properties.className.includes("math-inline")))
 
                       if (isMathInline) {
-                        return <span className="math-inline mx-1 inline-block">{children}</span>
+                        return (
+                          <span className="math-inline-container">
+                            <span className="math-inline mx-1 px-2 py-1 bg-muted/60 rounded-md border border-border/30 inline-block shadow-sm">
+                              {children}
+                            </span>
+                          </span>
+                        )
                       }
                       return (
                         <span className={className} {...props}>
@@ -204,6 +241,66 @@ export function ChatMessages({ messages, isLoading, copiedText, setCopiedText, m
                         </span>
                       )
                     },
+                    p: ({ children, ...props }) => (
+                      <p className="mb-4 last:mb-0 leading-relaxed" {...props}>
+                        {children}
+                      </p>
+                    ),
+                    h1: ({ children, ...props }) => (
+                      <h1 className="text-2xl font-bold mt-6 mb-3 first:mt-0" {...props}>
+                        {children}
+                      </h1>
+                    ),
+                    h2: ({ children, ...props }) => (
+                      <h2 className="text-xl font-semibold mt-5 mb-2 first:mt-0" {...props}>
+                        {children}
+                      </h2>
+                    ),
+                    h3: ({ children, ...props }) => (
+                      <h3 className="text-lg font-semibold mt-4 mb-2 first:mt-0" {...props}>
+                        {children}
+                      </h3>
+                    ),
+                    ul: ({ children, ...props }) => (
+                      <ul className="list-disc list-inside space-y-1 mb-4" {...props}>
+                        {children}
+                      </ul>
+                    ),
+                    ol: ({ children, ...props }) => (
+                      <ol className="list-decimal list-inside space-y-1 mb-4" {...props}>
+                        {children}
+                      </ol>
+                    ),
+                    li: ({ children, ...props }) => (
+                      <li className="mb-1" {...props}>
+                        {children}
+                      </li>
+                    ),
+                    blockquote: ({ children, ...props }) => (
+                      <blockquote 
+                        className="border-l-4 border-primary pl-4 py-2 my-4 bg-muted/30 rounded-r italic" 
+                        {...props}
+                      >
+                        {children}
+                      </blockquote>
+                    ),
+                    table: ({ children, ...props }) => (
+                      <div className="overflow-x-auto my-4">
+                        <table className="min-w-full border-collapse border border-border" {...props}>
+                          {children}
+                        </table>
+                      </div>
+                    ),
+                    th: ({ children, ...props }) => (
+                      <th className="border border-border bg-muted/50 px-3 py-2 text-left font-semibold" {...props}>
+                        {children}
+                      </th>
+                    ),
+                    td: ({ children, ...props }) => (
+                      <td className="border border-border px-3 py-2" {...props}>
+                        {children}
+                      </td>
+                    ),
                   }}
                 >
                   {message.content}

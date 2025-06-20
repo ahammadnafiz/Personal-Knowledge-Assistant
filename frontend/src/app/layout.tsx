@@ -1,5 +1,6 @@
 // app/layout.tsx
 import "./globals.css"
+import "katex/dist/katex.min.css"
 import type { Metadata } from "next"
 import { Quicksand } from "next/font/google"
 import { ThemeProvider } from "next-themes"
