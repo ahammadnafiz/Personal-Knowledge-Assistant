@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.rag import RAGService
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -13,7 +14,7 @@ async def chat(request: ChatRequest):
     Process a chat message using the RAG system and return a response
     """
     try:
-        rag_service = RAGService()
+        rag_service = RAGService(google_api_key=settings.GOOGLE_API_KEY)
         
         # Set web search enabled flag from request
         if hasattr(request, 'web_search_enabled') and request.web_search_enabled is not None:
@@ -37,7 +38,7 @@ async def get_chat_history():
     Get the current chat history
     """
     try:
-        rag_service = RAGService()
+        rag_service = RAGService(google_api_key=settings.GOOGLE_API_KEY)
         return rag_service.get_chat_history()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving chat history: {str(e)}")
@@ -48,7 +49,7 @@ async def clear_chat_history():
     Clear the current chat history
     """
     try:
-        rag_service = RAGService()
+        rag_service = RAGService(google_api_key=settings.GOOGLE_API_KEY)
         rag_service.clear_memory()
         return {"message": "Chat history cleared successfully"}
     except Exception as e:

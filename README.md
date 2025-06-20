@@ -44,7 +44,7 @@ Welcome to the **Personal Knowledge Assistant** project! This guide will walk yo
 
 - **Prompt Template**: Assembles a prompt with context, confidence level, and query
 - **Conversation Memory**: Maintains chat history for contextual responses
-- **LLM Generation**: Generates final response using Groq LLM (Mistral model)
+- **LLM Generation**: Generates final response using Google Gemini 2.0 Flash model
 - **Response Formatting**: Formats response based on confidence level with appropriate caveats
 
 ### Key Innovations
@@ -138,7 +138,7 @@ uvicorn
 pydantic
 pydantic-settings
 langchain
-langchain-groq
+langchain-google-genai
 langchain-community
 langchain-huggingface
 faiss-cpu
@@ -158,8 +158,13 @@ pip install -r requirements.txt
 Create a `.env` file in the backend directory:
 
 ```
-GROQ_API_KEY=your_groq_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
 ```
+
+To get your Google API key:
+1. Go to the [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. Create a new API key
+3. Copy the key and paste it in your `.env` file
 
 ### 5. Create empty `__init__.py` files
 
@@ -290,7 +295,7 @@ If the frontend can't connect to the backend:
 
 If you encounter authentication errors:
 
-1. Double-check your Groq API key in the `.env` file.
+1. Double-check your Google API key in the `.env` file.
 2. Ensure your HuggingFace token has the necessary permissions.
 
 ---
@@ -302,7 +307,7 @@ If you encounter authentication errors:
 To change the LLM model, edit `app/core/config.py`:
 
 ```python
-LLM_MODEL: str = "your-preferred-model"  # e.g., "llama3-8b-8192" for a smaller model
+LLM_MODEL: str = "your-preferred-model"  # e.g., "gemini-1.5-pro" for a different Google model
 ```
 
 ### Adjusting RAG Parameters

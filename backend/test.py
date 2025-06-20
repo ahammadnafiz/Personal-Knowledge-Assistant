@@ -841,7 +841,7 @@ class RAGService:
         
 if __name__ == '__main__':
     # Example usage of the RAGService
-    rag_service = RAGService()
+    rag_service = RAGService(google_api_key=os.getenv("GOOGLE_API_KEY"))
     
     # Ingest documents from a directory
     # num_chunks = rag_service.ingest_documents("path/to/pdf/directory")

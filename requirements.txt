@@ -3,10 +3,13 @@ uvicorn
 pydantic
 pydantic-settings
 langchain
-langchain-groq
+langchain-google-genai
 langchain-community
 langchain-huggingface
 faiss-cpu
 python-dotenv
 pypdf
 sentence-transformers
+newspaper4k>=0.9.2
+lxml_html_clean
+agno

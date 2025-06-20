@@ -6,12 +6,14 @@ from pydantic import BaseModel, Field
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain.chains import ConversationChain
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.memory import ConversationBufferMemory
-from langchain.schema import SystemMessage, HumanMessage, AIMessage
+from langchain.chains.conversation.memory import ConversationBufferWindowMemory
 from langchain.schema.document import Document
 from langchain.retrievers.document_compressors import EmbeddingsFilter, LLMChainExtractor
 from langchain.retrievers import ContextualCompressionRetriever
@@ -21,11 +23,22 @@ from app.core.config import settings
 
 from dotenv import load_dotenv
 from textwrap import dedent
-from agno.agent import Agent
-from agno.models.google import Gemini
-from agno.tools.duckduckgo import DuckDuckGoTools
-from agno.tools.newspaper4k import Newspaper4kTools
-from textwrap import dedent
+
+# Try to import agno tools - make web search optional if not available
+try:
+    from agno.agent import Agent
+    from agno.models.google import Gemini
+    from agno.tools.duckduckgo import DuckDuckGoTools
+    from agno.tools.newspaper4k import Newspaper4kTools
+    AGNO_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: agno tools not available: {e}")
+    print("Web search functionality will be disabled.")
+    AGNO_AVAILABLE = False
+    Agent = None
+    Gemini = None
+    DuckDuckGoTools = None
+    Newspaper4kTools = None
 
 load_dotenv()
 
@@ -58,8 +71,9 @@ class RAGService:
     """
     Self-Corrective RAG (CRAG) Service implementing the complete CRAG pipeline.
     """
-    def __init__(self):
+    def __init__(self, google_api_key: str = None):
         # Initialize components
+        self.google_api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
         self.embeddings = self._initialize_embeddings()
         self.vector_store = self._initialize_or_load_vector_store()
         self.llm = self._initialize_llm()
@@ -105,18 +119,22 @@ class RAGService:
     
     def _initialize_llm(self):
         """Initialize the language model."""
-        return ChatGroq(
-            groq_api_key=settings.GROQ_API_KEY_MODEL,
-            model_name=settings.LLM_MODEL,
-            temperature=0.6
+        return ChatGoogleGenerativeAI(
+            model=settings.LLM_MODEL,
+            google_api_key=self.google_api_key,
+            temperature=0.2,  # Slightly higher for more natural, less templated responses
+            max_tokens=8192,  # Increased for longer, more detailed responses
+            timeout=120,  # Longer timeout for detailed processing
+            max_retries=3,
+            request_timeout=60
         )
     
     def _initialize_memory(self):
         """Initialize conversation memory for chat history tracking."""
-        return ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer"
+        return ConversationBufferWindowMemory(
+            k=5, 
+            memory_key="chat_history", 
+            return_messages=True
         )
         
     def set_web_search_enabled(self, enabled: bool):
@@ -126,6 +144,7 @@ class RAGService:
     def evaluate_retrieval(self, query: str, document: str) -> RetrievalEvaluatorOutput:
         """
         Step 2 of CRAG: Evaluate the relevance and reliability of a document for the query.
+        Enhanced with more robust scoring methodology.
         
         Args:
             query: User query
@@ -134,35 +153,74 @@ class RAGService:
         Returns:
             RetrievalEvaluatorOutput with relevance and reliability scores
         """
+        # Truncate document if too long to avoid token limits
+        max_doc_length = 3000
+        if len(document) > max_doc_length:
+            document = document[:max_doc_length] + "..."
+            
         prompt = PromptTemplate(
             input_variables=["query", "document"],
             template="""
-            Evaluate the following document's relevance and reliability for answering the query.
+            You are an expert document evaluator. Analyze the document's relevance and reliability for answering the query.
             
-            Query: {query}
+            QUERY: {query}
             
-            Document: {document}
+            DOCUMENT CONTENT: {document}
             
-            Provide:
-            1. Relevance score (0-1): How directly the document addresses the query
-            2. Reliability score (0-1): How accurate and up-to-date the information seems
-            3. Brief reasoning for your evaluation
+            EVALUATION CRITERIA:
             
-            Format your response as:
-            Relevance: [score]
-            Reliability: [score]
-            Reasoning: [your reasoning]
+            RELEVANCE (0.0-1.0):
+            - 1.0: Document directly answers the query with specific information
+            - 0.8: Document contains most information needed to answer the query
+            - 0.6: Document contains some relevant information but incomplete
+            - 0.4: Document has limited relevance, only tangentially related
+            - 0.2: Document mentions topics from query but doesn't help answer it
+            - 0.0: Document is completely irrelevant to the query
+            
+            RELIABILITY (0.0-1.0):
+            - 1.0: Information appears factual, well-sourced, and authoritative
+            - 0.8: Information seems accurate with good supporting details
+            - 0.6: Information appears reasonable but lacks depth
+            - 0.4: Information has some questionable aspects or lacks context
+            - 0.2: Information seems outdated or potentially inaccurate
+            - 0.0: Information appears unreliable or contradictory
+            
+            ANALYSIS STEPS:
+            1. Identify key concepts in the query
+            2. Check if document addresses these concepts
+            3. Assess the completeness of information
+            4. Evaluate the quality and credibility of information
+            5. Consider recency and accuracy indicators
+            
+            RESPONSE FORMAT:
+            Relevance: [score between 0.0 and 1.0]
+            Reliability: [score between 0.0 and 1.0]
+            Reasoning: [2-3 sentences explaining your scoring with specific examples from the document]
             """
         )
         
-        chain = prompt | self.llm.with_structured_output(RetrievalEvaluatorOutput)
-        result = chain.invoke({"query": query, "document": document})
-        
-        return result
+        try:
+            chain = prompt | self.llm.with_structured_output(RetrievalEvaluatorOutput)
+            result = chain.invoke({"query": query, "document": document})
+            
+            # Validate scores are within bounds
+            result.relevance_score = max(0.0, min(1.0, result.relevance_score))
+            result.reliability_score = max(0.0, min(1.0, result.reliability_score))
+            
+            return result
+        except Exception as e:
+            print(f"Error in retrieval evaluation: {e}")
+            # Return default moderate scores if evaluation fails
+            return RetrievalEvaluatorOutput(
+                relevance_score=0.5,
+                reliability_score=0.5,
+                reasoning=f"Evaluation failed due to error: {str(e)}. Using default scores."
+            )
     
     def rewrite_query(self, query: str) -> QueryRewriterOutput:
         """
         Step 4 of CRAG (part 1): Rewrite the query to be more effective for search.
+        Enhanced with better query understanding and expansion.
         
         Args:
             query: Original user query
@@ -173,28 +231,66 @@ class RAGService:
         prompt = PromptTemplate(
             input_variables=["query"],
             template="""
-            Rewrite the following query to make it more effective for document retrieval and web search:
+            You are an expert query optimizer for document retrieval systems. Your task is to transform user queries into more effective search queries.
             
-            Query: {query}
+            ORIGINAL QUERY: {query}
             
-            Provide:
-            1. A rewritten version of the query that would yield better search results
-            2. A list of 3-5 key search terms extracted from the query
+            OPTIMIZATION GOALS:
+            1. Expand abbreviations and acronyms
+            2. Add relevant synonyms and related terms
+            3. Convert questions into keyword-focused statements
+            4. Include technical and domain-specific terminology
+            5. Make implicit concepts explicit
             
-            Format as:
-            Rewritten query: [rewritten query]
-            Search terms: [term1, term2, term3, ...]
+            ANALYSIS STEPS:
+            1. Identify the main topic/domain of the query
+            2. Extract key concepts and entities
+            3. Consider alternative phrasings and terminology
+            4. Add context-specific keywords that might appear in relevant documents
+            5. Structure for optimal semantic similarity matching
+            
+            OPTIMIZATION EXAMPLES:
+            - "What is machine learning?" → "machine learning definition algorithms supervised unsupervised deep learning neural networks"
+            - "How does photosynthesis work?" → "photosynthesis process chlorophyll light energy glucose carbon dioxide plants cellular respiration"
+            - "Python error handling" → "Python exception handling try catch except finally error management debugging"
+            
+            RESPONSE FORMAT:
+            Rewritten query: [Optimized query with expanded terms and concepts]
+            Search terms: [List of 5-8 key terms that should appear in relevant documents]
+            
+            INSTRUCTIONS:
+            - Keep the core intent of the original query
+            - Add domain-specific terminology likely to appear in relevant documents  
+            - Include both general and specific terms
+            - Focus on information-rich keywords
+            - Avoid overly complex or unnatural phrasing
             """
         )
         
-        chain = prompt | self.llm.with_structured_output(QueryRewriterOutput)
-        result = chain.invoke({"query": query})
-        
-        return result
+        try:
+            chain = prompt | self.llm.with_structured_output(QueryRewriterOutput)
+            result = chain.invoke({"query": query})
+            
+            # Validate and clean up the results
+            if not result.query:
+                result.query = query  # Fallback to original
+            if not result.search_terms:
+                result.search_terms = query.split()  # Basic fallback
+                
+            return result
+        except Exception as e:
+            print(f"Query rewriting failed: {e}")
+            # Fallback to basic query processing
+            basic_terms = query.lower().replace('?', '').replace('.', '').split()
+            return QueryRewriterOutput(
+                query=query,
+                search_terms=basic_terms[:5]
+            )
     
     def decompose_knowledge(self, document: str, query: str) -> KnowledgeStripOutput:
         """
         Step 3 of CRAG (part 1): Decompose a document into knowledge strips.
+        Enhanced to preserve more context and detail.
         
         Args:
             document: Document content to decompose
@@ -203,61 +299,102 @@ class RAGService:
         Returns:
             KnowledgeStripOutput with knowledge strips and their relevance scores
         """
+        # Truncate document if too long
+        max_doc_length = 4000
+        if len(document) > max_doc_length:
+            document = document[:max_doc_length] + "..."
+            
         prompt = PromptTemplate(
             input_variables=["document", "query"],
             template="""
-            Decompose the following document into individual "knowledge strips" (discrete facts or pieces of information).
-            Then rate each strip's relevance to the query on a scale of 0-1.
+            You are an expert information analyst. Extract comprehensive knowledge strips from the document that are relevant to the query.
             
-            Document: {document}
+            DOCUMENT CONTENT: {document}
             
-            Query: {query}
+            USER QUERY: {query}
             
-            Format as:
-            Strip 1: [fact/information]
+            TASK: Decompose the document into detailed "knowledge strips" - coherent pieces of information that maintain context and detail.
+            
+            GUIDELINES FOR KNOWLEDGE STRIPS:
+            1. Each strip should be 2-5 sentences that form a complete thought
+            2. Preserve technical details, definitions, and context
+            3. Include supporting information and explanations
+            4. Maintain connections between related concepts
+            5. Keep important qualifiers, examples, and specifics
+            6. Ensure each strip can stand alone as meaningful information
+            
+            RELEVANCE SCORING (0.0 to 1.0):
+            - 1.0: Directly answers the query with comprehensive detail
+            - 0.9: Highly relevant with important supporting information
+            - 0.8: Relevant with good context and detail
+            - 0.7: Moderately relevant with useful information
+            - 0.6: Somewhat relevant with background context
+            - 0.5: Tangentially relevant but provides context
+            - Below 0.5: Limited relevance
+            
+            FORMAT (Extract 6-10 knowledge strips):
+            Strip 1: [Comprehensive information with context and details]
             Score 1: [relevance score]
             
-            Strip 2: [fact/information]
+            Strip 2: [Comprehensive information with context and details]
             Score 2: [relevance score]
             
-            And so on...
+            Continue for all relevant information...
+            
+            FOCUS: Prioritize comprehensive, detailed strips that provide deep understanding rather than brief mentions.
             """
         )
         
-        # First get the raw output
-        raw_output = self.llm.invoke(prompt.format(document=document, query=query))
-        
-        # Parse the raw output into strips and scores
-        strips = []
-        strip_scores = []
-        
-        lines = raw_output.content.split('\n')
-        for i in range(0, len(lines) - 1, 2):
-            if i + 1 < len(lines) and lines[i].startswith("Strip") and lines[i+1].startswith("Score"):
-                # Extract the strip content (everything after the colon)
-                strip_content = ":".join(lines[i].split(":", 1)[1:]).strip()
-                strips.append(strip_content)
+        try:
+            # First get the raw output
+            raw_output = self.llm.invoke(prompt.format(document=document, query=query))
+            
+            # Parse the raw output into strips and scores
+            strips = []
+            strip_scores = []
+            
+            lines = raw_output.content.split('\n')
+            for i in range(0, len(lines) - 1, 2):
+                if i + 1 < len(lines) and lines[i].startswith("Strip") and lines[i+1].startswith("Score"):
+                    # Extract the strip content (everything after the colon)
+                    strip_content = ":".join(lines[i].split(":", 1)[1:]).strip()
+                    if strip_content and len(strip_content) > 20:  # Ensure substantial content
+                        strips.append(strip_content)
+                        
+                        # Extract the score (everything after the colon)
+                        score_text = ":".join(lines[i+1].split(":", 1)[1:]).strip()
+                        try:
+                            score = float(score_text)
+                            strip_scores.append(min(max(score, 0.0), 1.0))  # Ensure score is between 0 and 1
+                        except ValueError:
+                            strip_scores.append(0.6)  # Default to moderate score if parsing fails
+            
+            # If no strips were extracted, create a fallback
+            if not strips:
+                strips = [document[:1000] + "..." if len(document) > 1000 else document]
+                strip_scores = [0.7]
                 
-                # Extract the score (everything after the colon)
-                score_text = ":".join(lines[i+1].split(":", 1)[1:]).strip()
-                try:
-                    score = float(score_text)
-                    strip_scores.append(min(max(score, 0.0), 1.0))  # Ensure score is between 0 and 1
-                except ValueError:
-                    strip_scores.append(0.5)  # Default to 0.5 if parsing fails
-        
-        return KnowledgeStripOutput(strips=strips, strip_scores=strip_scores)
+            return KnowledgeStripOutput(strips=strips, strip_scores=strip_scores)
+            
+        except Exception as e:
+            print(f"Error in knowledge decomposition: {e}")
+            # Fallback to using the document as-is
+            return KnowledgeStripOutput(
+                strips=[document[:1500] + "..." if len(document) > 1500 else document],
+                strip_scores=[0.6]
+            )
     
-    def filter_knowledge_strips(self, strips_output: KnowledgeStripOutput, threshold: float = 0.5) -> str:
+    def filter_knowledge_strips(self, strips_output: KnowledgeStripOutput, threshold: float = 0.4) -> str:
         """
         Step 3 of CRAG (part 2): Filter knowledge strips based on relevance score.
+        Enhanced to preserve more detailed information.
         
         Args:
             strips_output: Output from decompose_knowledge
-            threshold: Minimum score to keep a strip
+            threshold: Minimum score to keep a strip (lowered for more comprehensive responses)
             
         Returns:
-            String of filtered high-quality knowledge
+            String of filtered high-quality knowledge with detailed formatting
         """
         high_quality_strips = [
             strip for strip, score in zip(strips_output.strips, strips_output.strip_scores)
@@ -265,9 +402,23 @@ class RAGService:
         ]
         
         if not high_quality_strips:
-            return "No relevant information found."
+            # If no strips meet threshold, include the highest scoring ones
+            if strips_output.strips:
+                max_score_idx = strips_output.strip_scores.index(max(strips_output.strip_scores))
+                high_quality_strips = [strips_output.strips[max_score_idx]]
+            else:
+                return "No relevant information found in the document."
         
-        return "\n".join([f"- {strip}" for strip in high_quality_strips])
+        # Format the strips with better structure for comprehensive responses
+        formatted_strips = []
+        for i, strip in enumerate(high_quality_strips):
+            # Add section markers for better organization in long responses
+            if len(high_quality_strips) > 3:
+                formatted_strips.append(f"**Section {i+1}**: {strip}")
+            else:
+                formatted_strips.append(f"• {strip}")
+        
+        return "\n\n".join(formatted_strips)
 
     def perform_web_search(self, search_query: str, num_results: int = 5) -> str:
         """
@@ -278,8 +429,11 @@ class RAGService:
             num_results: Number of search results to retrieve
             
         Returns:
-            List of WebSearchResult objects
+            String with search results or error message
         """
+        
+        if not AGNO_AVAILABLE:
+            return "Web search is not available due to missing dependencies. Please install: pip install newspaper4k lxml_html_clean agno"
             
         try:
             research_agent = Agent(
@@ -337,7 +491,7 @@ class RAGService:
                     
         except Exception as e:
             print(f"Web search error: {e}")
-            return ''
+            return f'Web search failed: {str(e)}'
     
     def ingest_documents(self, directory_path: str, specific_files: Optional[List[str]] = None) -> int:
         """
@@ -420,26 +574,41 @@ class RAGService:
         if not self.vector_store:
             raise ValueError("Vector store is not initialized. Please ingest documents first.")
             
+        # Use MMR for more diverse results
         base_retriever = self.vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": self.top_k_results}
+            search_type="mmr",  # Maximum Marginal Relevance for diversity
+            search_kwargs={
+                "k": self.top_k_results * 2,  # Fetch more candidates
+                "lambda_mult": 0.7,  # Balance between relevance and diversity
+                "fetch_k": self.top_k_results * 3  # Initial fetch size
+            }
         )
         
-        # Create document compressors
+        # Create more selective document compressors
         embeddings_filter = EmbeddingsFilter(
             embeddings=self.embeddings,
-            similarity_threshold=0.75
+            similarity_threshold=0.65,  # Lower threshold for more inclusive filtering
+            k=self.top_k_results
         )
         
         extractor_prompt = PromptTemplate(
             input_variables=["question", "context"],
-            template="""Given the following question and context, extract only the parts of the context 
-            that are directly relevant to answering the question.
+            template="""You are an expert information extractor. Your task is to identify and extract ONLY the parts of the context that are directly relevant to answering the specific question.
+
+            QUESTION: {question}
             
-            Question: {question}
-            Context: {context}
+            CONTEXT: {context}
             
-            Relevant content:"""
+            INSTRUCTIONS:
+            1. Read the question carefully to understand what information is being sought
+            2. Scan the context for information that directly addresses the question
+            3. Extract complete sentences or paragraphs that contain relevant information
+            4. Include supporting details that provide context to the main answer
+            5. If no relevant information exists, return "No relevant information found"
+            6. Do not add any information not present in the context
+            7. Preserve the original wording and technical terms
+            
+            RELEVANT EXTRACTED CONTENT:"""
         )
         
         llm_extractor = LLMChainExtractor.from_llm(
@@ -447,7 +616,7 @@ class RAGService:
             prompt=extractor_prompt
         )
         
-        # Chain the compressors
+        # Chain the compressors - order matters
         compression_pipeline = DocumentCompressorPipeline(
             transformers=[embeddings_filter, llm_extractor]
         )
@@ -575,57 +744,98 @@ class RAGService:
             response = self._generate_response(query, final_knowledge, best_score, sources)
             
             # Save to memory
-            self.memory.save_context({"input": query}, {"answer": response})
+            self.memory.chat_memory.add_user_message(query)
+            self.memory.chat_memory.add_ai_message(response)
             
             return response, sources, debug_info
         
         # If web search is not enabled, only use local documents
         else:
             
-            # Step 2: Initial retrieval with contextual compression
-            retriever = self.create_contextual_compression_retriever()
-            retrieved_docs = retriever.invoke(rewritten_query)
+            # Step 2: Enhanced retrieval with hybrid approach
+            print("Using hybrid retrieval for better document matching...")
+            retrieved_docs = self.hybrid_retrieval(query, rewritten_query)
             
             # If no documents were retrieved, handle empty case
             if not retrieved_docs:
-                print("No documents retrieved from vector store.")
-
-                self.latest_crag_action = "web_search_fallback"
-                debug_info["crag_action"] = "web_search_fallback"
+                print("No documents retrieved from vector store using hybrid approach.")
                 
-                # Perform web search
-                external_knowledge = self.perform_web_search(rewritten_query)
-                
-                # Create a response with web search results
-                response = self._generate_response(query, external_knowledge, 0.5, ["Web search"])
-                return response, ["Web search"], debug_info
+                # Try fallback with basic similarity search
+                try:
+                    fallback_docs = self.vector_store.similarity_search(query, k=self.top_k_results)
+                    if fallback_docs:
+                        retrieved_docs = fallback_docs
+                        print(f"Fallback retrieval found {len(fallback_docs)} documents")
+                    else:
+                        self.latest_crag_action = "web_search_fallback"
+                        debug_info["crag_action"] = "web_search_fallback"
+                        
+                        # Perform web search
+                        external_knowledge = self.perform_web_search(rewritten_query)
+                        
+                        # Create a response with web search results
+                        response = self._generate_response(query, external_knowledge, 0.5, ["Web search"])
+                        return response, ["Web search"], debug_info
+                except Exception as e:
+                    print(f"Even fallback retrieval failed: {e}")
+                    return "Unable to retrieve any relevant documents. Please check if documents are properly ingested.", [], {"error": "Retrieval failure"}
             
-            # Step 3: Evaluate retrieved documents
+            print(f"Retrieved {len(retrieved_docs)} documents for evaluation")
+            
+            # Step 3: Enhanced document evaluation with batch processing
             doc_evaluations = []
-            for doc in retrieved_docs:
-                eval_result = self.evaluate_retrieval(query, doc.page_content)
-                doc_evaluations.append({
-                    "document": doc,
-                    "relevance": eval_result.relevance_score,
-                    "reliability": eval_result.reliability_score,
-                    "combined_score": (eval_result.relevance_score + eval_result.reliability_score) / 2,
-                    "reasoning": eval_result.reasoning
-                })
+            for i, doc in enumerate(retrieved_docs):
+                try:
+                    print(f"Evaluating document {i+1}/{len(retrieved_docs)}...")
+                    eval_result = self.evaluate_retrieval(query, doc.page_content)
+                    doc_evaluations.append({
+                        "document": doc,
+                        "relevance": eval_result.relevance_score,
+                        "reliability": eval_result.reliability_score,
+                        "combined_score": (eval_result.relevance_score + eval_result.reliability_score) / 2,
+                        "reasoning": eval_result.reasoning,
+                        "retrieval_method": doc.metadata.get('retrieval_method', 'unknown')
+                    })
+                except Exception as e:
+                    print(f"Error evaluating document {i+1}: {e}")
+                    # Add with default scores if evaluation fails
+                    doc_evaluations.append({
+                        "document": doc,
+                        "relevance": 0.4,
+                        "reliability": 0.4,
+                        "combined_score": 0.4,
+                        "reasoning": f"Evaluation failed: {str(e)}",
+                        "retrieval_method": doc.metadata.get('retrieval_method', 'unknown')
+                    })
             
-            # Sort documents by combined score (descending)
-            doc_evaluations.sort(key=lambda x: x["combined_score"], reverse=True)
+            # Sort documents by combined score (descending), with tie-breaking by retrieval method
+            def sort_key(eval_dict):
+                base_score = eval_dict["combined_score"]
+                # Bonus for certain retrieval methods
+                method_bonus = {
+                    'similarity_original': 0.05,
+                    'similarity_rewritten': 0.03,
+                    'mmr': 0.02,
+                    'keyword_expanded': 0.01
+                }.get(eval_dict.get("retrieval_method", ""), 0)
+                return base_score + method_bonus
+            
+            doc_evaluations.sort(key=sort_key, reverse=True)
             
             # Record evaluation scores for debugging
             debug_info["evaluation_scores"] = [{
                 "relevance": eval["relevance"], 
                 "reliability": eval["reliability"],
                 "combined_score": eval["combined_score"],
-                "reasoning": eval["reasoning"]
+                "reasoning": eval["reasoning"],
+                "retrieval_method": eval.get("retrieval_method", "unknown")
             } for eval in doc_evaluations]
             
             # Get the best document and its score
             best_eval = doc_evaluations[0] if doc_evaluations else None
             best_score = best_eval["combined_score"] if best_eval else 0
+            
+            print(f"Best document score: {best_score:.3f} (method: {best_eval.get('retrieval_method', 'unknown') if best_eval else 'none'})")
             
             # Step 4: Determine CRAG action based on evaluation scores
             sources = []
@@ -644,7 +854,7 @@ class RAGService:
                 refined_knowledge = []
                 for doc in top_docs:
                     strips_output = self.decompose_knowledge(doc.page_content, query)
-                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.6)
+                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.4)  # Lower threshold for more content
                     refined_knowledge.append(filtered_content)
                     
                     # Track source
@@ -670,7 +880,7 @@ class RAGService:
                 for eval in doc_evaluations:
                     doc = eval["document"]
                     strips_output = self.decompose_knowledge(doc.page_content, query)
-                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.4)  # Lower threshold
+                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.3)  # Lower threshold for ambiguous cases
                     doc_knowledge.append(filtered_content)
                     
                     # Track source
@@ -696,7 +906,7 @@ class RAGService:
                 for eval in doc_evaluations:
                     doc = eval["document"]
                     strips_output = self.decompose_knowledge(doc.page_content, query)
-                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.5)
+                    filtered_content = self.filter_knowledge_strips(strips_output, threshold=0.3)  # Lower threshold for comprehensive coverage
                     doc_knowledge.append(filtered_content)
                     
                     # Track source
@@ -723,7 +933,8 @@ class RAGService:
             response = self._generate_response(query, final_knowledge, best_score, sources)
             
             # Save to memory
-            self.memory.save_context({"input": query}, {"answer": response})
+            self.memory.chat_memory.add_user_message(query)
+            self.memory.chat_memory.add_ai_message(response)
             
             return response, sources, debug_info
     
@@ -750,78 +961,121 @@ class RAGService:
         
         # Create the prompt template
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """**Role**: You are My Personal Knowledge Architect, designed to analyze and synthesize information from my private document collection.
+            ("system", """You are an Expert Technical Assistant specializing in providing comprehensive, practical answers based on document analysis.
 
-            **Core Capabilities**:
-            1. Cross-Document Synthesis: Connect concepts across different files/books/papers
-            2. Adaptive Explanation: Adjust depth based on content type:
-            - Technical Papers: Math/formulas/citations
-            - Books: Chapter summaries & thematic analysis
-            - Scripts: Code structure & implementation logic
-            - Notes: Contextual reconstruction
-            3. Source Tracing: Always reference filename + page/line numbers
-            4. Knowledge Gaps: Flag missing information between documents
+**Your Role**: Respond directly and naturally to the user's specific question using the information from the provided documents. Do not use templates or forced structures - instead, tailor your response to what the user is actually asking for.
 
-            **Operational Rules**:
-            1. Absolute Truthfulness: Never invent beyond provided documents
-            2. Concept Mapping: Show relationships between ideas from different sources
-            3. Layered Explanations:
-            - deep dive with examples
-            4. Special Handling For:
-            ```[Code Blocks] → Preserve original formatting + explain logic
-            [Diagrams/Images] → Describe visual elements verbatim
-            [Handwritten Notes] → Decipher ambiguous text cautiously```
+**Response Principles**:
+1. **Answer the Actual Question**: Focus on what the user specifically wants to know
+2. **Be Comprehensive but Natural**: Provide thorough information in a conversational, educational style
+3. **Include Practical Details**: When asked about implementation, provide code examples, algorithms, steps, and practical guidance
+4. **Use Document Content**: Base your response entirely on the provided documents
+5. **Maintain Educational Depth**: Explain concepts thoroughly but organically based on the query
 
-            **Confidence Framework**:
-            - High (70-100%): Exact matches in multiple documents
-            - Medium (30-69%): Partial matches requiring inference
-            - Low (<30%): Tentative connections
+**For Implementation/Coding Questions**:
+- Provide actual code examples and implementation details
+- Break down algorithmic steps clearly
+- Explain the mathematical foundations when relevant
+- Include practical considerations and best practices
+- Show how different components work together
 
-            **Response Template**:
-            "[Brief Answer]
-            **Full Analysis**:  
-            [Detailed explanation with quotes/excerpts]
-            **Sources**: [File Names + Locations]  
-            **Connections**: [Cross-document links]  
-            **Gaps**: [Missing knowledge alerts]  
-            "  
+**For Conceptual Questions**:
+- Start with clear definitions
+- Explain underlying principles and mechanisms
+- Provide context and applications
+- Compare with related approaches when relevant
 
-            **Critical Directives**:
-            - If uncertain: "My documents suggest... [but are incomplete]"
-            - For conflicting info: "Document A says X, while Document B states Y"
-            - Preserve original document phrasing when crucial
-            - Never assume access to external knowledge"""),
+**For Explanatory Questions**:
+- Give intuitive explanations first
+- Follow with technical details
+- Use examples to illustrate concepts
+- Connect to broader context when helpful
+
+**Quality Standards**:
+- Accuracy: Only use information from the provided documents
+- Completeness: Address all aspects of the user's question
+- Clarity: Use clear, accessible language while maintaining technical precision
+- Practicality: Focus on actionable, useful information
+- Depth: Provide sufficient detail for thorough understanding
+
+**Critical Instructions**:
+- NEVER use rigid templates or forced section headers unless the user specifically asks for structured output
+- Respond naturally to what the user is asking
+- If they want code, give them code with explanations
+- If they want explanations, focus on clear conceptual understanding
+- If they want implementation guidance, provide step-by-step practical advice
+- Always acknowledge when information is incomplete or when documents don't contain specific details"""),
                 MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{input}"),
-                ("system", """**Active Documents**:
-            {context}
+                ("human", "Query: {input}"),
+                ("system", """**Document Content**:
+{context}
 
-    METADATA:
-    - Confidence Level: {confidence_level}
-    - Sources: {sources}
+**Information Sources**: {sources}
+**Confidence Level**: {confidence_level}
 
-    Respond directly to the user's query using ONLY the information provided above. 
-    If the information is incomplete or uncertain, acknowledge this fact.
-    Always cite your sources at the end of your response in a "References" section.
-    """),
+**Instructions**: 
+Respond directly to the user's query using the document content above. Tailor your response to what they're specifically asking for:
+
+- If they want to know "how to code" something, focus on implementation details, code examples, and algorithmic steps
+- If they want explanations, provide clear conceptual understanding with technical depth
+- If they want to understand mechanisms, explain how things work internally
+- Always base your response on the document content and cite sources appropriately
+
+Make your response comprehensive and educational, but structure it naturally around their specific question rather than using predefined templates."""),
         ])
         
-        # Create document chain
-        document_chain = create_stuff_documents_chain(self.llm, prompt)
+        # Create document chain with error handling
+        try:
+            document_chain = create_stuff_documents_chain(self.llm, prompt)
+            
+            # Create a proper Document object
+            documents = [Document(page_content=knowledge)]
+            
+            # Generate response
+            response = document_chain.invoke({
+                "input": query,
+                "chat_history": self.memory.chat_memory.messages,
+                "context": documents,
+                "confidence_level": confidence_level,
+                "sources": ", ".join(sources) if sources else "No specific sources"
+            })
+            
+            return response
+            
+        except Exception as e:
+            print(f"Error in response generation: {e}")
+            # Fallback to a simpler response
+            fallback_response = f"""I encountered an error while processing your query: {str(e)}
+
+Based on the available information from the documents, I can provide the following:
+
+{knowledge[:1000]}{'...' if len(knowledge) > 1000 else ''}
+
+**References**: {', '.join(sources) if sources else 'No specific sources'}
+
+Please note: This response may be incomplete due to the processing error."""
+            
+            return fallback_response
+    
+    def _initialize_conversation_chain(self):
+        """Initialize conversation chain for basic chat functionality."""
+        stage1_prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="""You are a helpful AI assistant. You can engage in conversation and answer questions based on context and previous conversation history."""),
+            MessagesPlaceholder(variable_name="chat_history"),
+            HumanMessagePromptTemplate.from_template("{human_input}")
+        ])
         
-        # Create a proper Document object
-        documents = [Document(page_content=knowledge)]
-        
-        # Generate response
-        response = document_chain.invoke({
-            "input": query,
-            "chat_history": self.memory.load_memory_variables({})["chat_history"],
-            "context": documents,  # Pass a list of Document objects
-            "confidence_level": confidence_level,
-            "sources": ", ".join(sources) if sources else "No specific sources"
-        })
-        
-        return response
+        return ConversationChain(
+            llm=self.llm,
+            prompt=stage1_prompt,
+            verbose=True,
+            memory=self.memory,
+            input_key="human_input",
+        )
+    
+    def get_conversation_chain(self):
+        """Get the conversation chain for direct conversation."""
+        return self._initialize_conversation_chain()
     
     def get_chat_history(self) -> List[Dict[str, str]]:
         """Get the current chat history as a list of message dictionaries."""
@@ -838,3 +1092,104 @@ class RAGService:
     def clear_memory(self):
         """Clear the conversation memory."""
         self.memory.clear()
+    
+    def hybrid_retrieval(self, query: str, rewritten_query: str) -> List[Document]:
+        """
+        Perform hybrid retrieval using multiple strategies for better recall.
+        
+        Args:
+            query: Original query
+            rewritten_query: Optimized query
+            
+        Returns:
+            List of documents ranked by relevance
+        """
+        if not self.vector_store:
+            return []
+            
+        all_docs = []
+        seen_content = set()
+        
+        try:
+            # Strategy 1: Similarity search with original query
+            similarity_docs = self.vector_store.similarity_search(
+                query, 
+                k=self.top_k_results
+            )
+            
+            for doc in similarity_docs:
+                content_hash = hash(doc.page_content[:200])  # Hash first 200 chars for deduplication
+                if content_hash not in seen_content:
+                    doc.metadata['retrieval_method'] = 'similarity_original'
+                    doc.metadata['retrieval_score'] = 1.0
+                    all_docs.append(doc)
+                    seen_content.add(content_hash)
+            
+            # Strategy 2: Similarity search with rewritten query
+            rewritten_docs = self.vector_store.similarity_search(
+                rewritten_query, 
+                k=self.top_k_results
+            )
+            
+            for doc in rewritten_docs:
+                content_hash = hash(doc.page_content[:200])
+                if content_hash not in seen_content:
+                    doc.metadata['retrieval_method'] = 'similarity_rewritten'
+                    doc.metadata['retrieval_score'] = 0.9
+                    all_docs.append(doc)
+                    seen_content.add(content_hash)
+            
+            # Strategy 3: MMR search for diversity
+            try:
+                mmr_docs = self.vector_store.max_marginal_relevance_search(
+                    rewritten_query,
+                    k=self.top_k_results,
+                    lambda_mult=0.8  # High relevance, some diversity
+                )
+                
+                for doc in mmr_docs:
+                    content_hash = hash(doc.page_content[:200])
+                    if content_hash not in seen_content:
+                        doc.metadata['retrieval_method'] = 'mmr'
+                        doc.metadata['retrieval_score'] = 0.8
+                        all_docs.append(doc)
+                        seen_content.add(content_hash)
+            except Exception as e:
+                print(f"MMR search failed: {e}")
+            
+            # Strategy 4: Keyword-based similarity with expanded terms
+            query_terms = query.lower().split()
+            expanded_query = " ".join(query_terms + rewritten_query.lower().split())
+            
+            keyword_docs = self.vector_store.similarity_search(
+                expanded_query,
+                k=self.top_k_results // 2
+            )
+            
+            for doc in keyword_docs:
+                content_hash = hash(doc.page_content[:200])
+                if content_hash not in seen_content:
+                    doc.metadata['retrieval_method'] = 'keyword_expanded'
+                    doc.metadata['retrieval_score'] = 0.7
+                    all_docs.append(doc)
+                    seen_content.add(content_hash)
+            
+            # Rank documents by a combination of retrieval score and content length (favor more informative docs)
+            def rank_document(doc):
+                base_score = doc.metadata.get('retrieval_score', 0.5)
+                content_length_bonus = min(len(doc.page_content) / 1000, 0.2)  # Max 0.2 bonus
+                return base_score + content_length_bonus
+            
+            all_docs.sort(key=rank_document, reverse=True)
+            
+            # Return top documents, limited by TOP_K_RESULTS
+            return all_docs[:self.top_k_results]
+            
+        except Exception as e:
+            print(f"Hybrid retrieval error: {e}")
+            # Fallback to simple similarity search
+            try:
+                return self.vector_store.similarity_search(query, k=self.top_k_results)
+            except Exception as fallback_e:
+                print(f"Fallback retrieval also failed: {fallback_e}")
+                return []

@@ -95,7 +95,7 @@ def ingest_files(file_paths: List[str]):
     Ingest specific files into the vector store
     """
     try:
-        rag_service = RAGService()
+        rag_service = RAGService(google_api_key=settings.GOOGLE_API_KEY)
         # Get just the filenames for specific file ingestion
         filenames = [os.path.basename(path) for path in file_paths]
         num_chunks = rag_service.ingest_documents(UPLOAD_DIR, specific_files=filenames)

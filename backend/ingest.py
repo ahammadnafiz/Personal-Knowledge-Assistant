@@ -7,13 +7,14 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.services.rag import RAGService
+from app.core.config import settings
 
 def main():
     parser = argparse.ArgumentParser(description='Ingest books into the knowledge base')
     parser.add_argument('--dir', type=str, required=True, help='Directory containing PDF books')
     args = parser.parse_args()
     
-    rag_service = RAGService()
+    rag_service = RAGService(google_api_key=settings.GOOGLE_API_KEY)
     num_chunks = rag_service.ingest_documents(args.dir)
     print(f"Successfully ingested documents. Created {num_chunks} text chunks in the vector store.")
 
